@@ -76,6 +76,35 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
   border: 1px solid var(--rule); border-radius: 50%; background: var(--sheet); color: var(--ink); font-size: 17px; line-height: 1;
 }
 .bar-theme[hidden] { display: none; }
+.bar-text { font-size: 15px; font-weight: 700; }
+.bar-text[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+
+/* Text size and font. Every size in this sheet is px, so zooming the content column scales
+   questions, passages and buttons together while the top and bottom bars stay put. */
+#app { zoom: var(--text-zoom, 1); }
+:root[data-font="gothic"] { --font-text: var(--font-body); }
+:root[data-font="ud"] { --font-text: "BIZ UDPGothic", "Hiragino Sans", "Noto Sans JP", sans-serif; }
+:root[data-font="textbook"] { --font-text: "Klee One", "Hiragino Mincho ProN", "Yu Mincho", serif; }
+.text-pop {
+  position: absolute; top: calc(100% + 6px); right: max(16px, env(safe-area-inset-right, 0px));
+  width: min(340px, calc(100vw - 32px)); display: grid; gap: 16px; padding: 16px;
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgb(0 0 0 / .18);
+}
+.text-pop[hidden] { display: none; }
+.text-set { display: grid; gap: 10px; }
+.text-set h3 { margin: 0; font-size: 14px; }
+.size-row { display: grid; grid-template-columns: 48px 1fr 48px; align-items: center; gap: 8px; }
+.size-row button {
+  height: 44px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--sheet);
+  font-family: var(--font-text); font-weight: 700; line-height: 1;
+}
+.size-row button:disabled { opacity: .4; cursor: default; }
+.size-row output { text-align: center; font: 500 16px var(--font-num); }
+.font-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.font-grid .chip { border-radius: var(--radius); display: grid; gap: 2px; justify-items: start; text-align: left; padding: 8px 12px; }
+.font-grid .chip b { font-size: 20px; font-weight: 500; line-height: 1.4; }
+.font-grid .chip span { font-size: 12px; font-weight: 400; color: var(--muted); }
 .bar-right { display: flex; align-items: center; gap: 10px; font-family: var(--font-num); font-size: 14px; color: var(--muted); }
 .timer { font-variant-numeric: tabular-nums; }
 .timer.over { color: var(--bad); }

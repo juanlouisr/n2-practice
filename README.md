@@ -30,6 +30,9 @@ Listening audio is Gemini text-to-speech with a different random cast for every 
   accuracy, trend and speed against exam pace (with a Practice button), grammar patterns
   you keep missing, exam vs practice accuracy, and coverage. It's all kept in your
   browser; use Export / Import on the Progress page to back it up or move it.
+- **Text size and font:** Aa in the top bar (also in Settings, and during a test) makes
+  questions and passages bigger or smaller, 85% to 175%, and switches the Japanese font
+  between 明朝 (like the exam paper), ゴシック, UDゴシック and a handwritten style.
 - **Fresh questions:** add your own Gemini API key in Settings to generate new sets on
   demand. The key stays in your browser and is sent only to Google.
 

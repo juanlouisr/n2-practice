@@ -62,6 +62,7 @@ function settings() {
     mode: "practice", speed: 1, examDate: "2026-12-06", key: "",
     textModel: "gemini-3.8-flash", ttsModel: "gemini-3.8-flash-tts",
     custom: { lang: 20, reading: 8, listening: 10, minutes: 30, exam: true, minutesSet: false }, theme: "system",
+    textSize: 1, textFont: "mincho",
   }, store.settings);
 }
 function loadLive() {
@@ -203,6 +204,87 @@ themeBtn.addEventListener("click", () => setTheme(themeIsDark() ? "light" : "dar
 darkQuery.addEventListener("change", applyTheme);
 applyTheme();
 
+// ---------- text size and font ----------
+
+const TEXT_SIZES = [0.85, 1, 1.15, 1.3, 1.5, 1.75];
+// The font for Japanese question text; English and interface text keep the body font.
+const TEXT_FONTS = {
+  mincho: { name: "明朝", note: "Exam paper", family: "'Shippori Mincho', serif" },
+  gothic: { name: "ゴシック", note: "Plain", family: "'Zen Kaku Gothic New', sans-serif" },
+  ud: { name: "UDゴシック", note: "Easy to read", family: "'BIZ UDPGothic', sans-serif", load: "BIZ+UDPGothic:wght@400;700" },
+  textbook: { name: "手書き風", note: "Clear strokes", family: "'Klee One', serif", load: "Klee+One:wght@400;600" },
+};
+const textBtn = $("#text-btn");
+const textPop = $("#text-pop");
+
+function loadFont(key) {
+  const f = TEXT_FONTS[key];
+  if (!f?.load || document.querySelector(`link[data-font="${key}"]`)) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet"; link.dataset.font = key;
+  link.href = `https://fonts.googleapis.com/css2?family=${f.load}&display=swap`;
+  document.head.append(link);
+}
+function textControls() {
+  return `
+    <section class="text-set"><h3>Text size</h3>
+      <div class="size-row">
+        <button type="button" data-size-step="-1" aria-label="Smaller text" style="font-size:14px">A</button>
+        <output data-size-out aria-live="polite"></output>
+        <button type="button" data-size-step="1" aria-label="Larger text" style="font-size:22px">A</button>
+      </div>
+    </section>
+    <section class="text-set"><h3>Japanese font</h3>
+      <div class="font-grid">${Object.entries(TEXT_FONTS).map(([k, f]) => `
+        <button class="chip" type="button" data-font-pick="${k}"><b style="font-family:${f.family}">日本語</b><span>${f.name}</span><span>${f.note}</span></button>`).join("")}
+      </div>
+    </section>`;
+}
+function syncTextControls() {
+  const { textSize, textFont } = settings();
+  document.querySelectorAll("[data-size-out]").forEach((o) => (o.textContent = `${Math.round(textSize * 100)}%`));
+  document.querySelectorAll("[data-size-step]").forEach((b) => {
+    b.disabled = b.dataset.sizeStep < 0 ? textSize <= TEXT_SIZES[0] : textSize >= TEXT_SIZES.at(-1);
+  });
+  document.querySelectorAll("[data-font-pick]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.fontPick === textFont)));
+}
+function applyText() {
+  const { textSize, textFont } = settings();
+  document.documentElement.style.setProperty("--text-zoom", textSize);
+  if (textFont === "mincho") delete document.documentElement.dataset.font;
+  else document.documentElement.dataset.font = textFont;
+  loadFont(textFont);
+  syncTextControls();
+}
+function setText(key, value) {
+  store.settings[key] = value;
+  saveStore();
+  applyText();
+}
+function showTextPop(open) {
+  textPop.hidden = !open;
+  textBtn.setAttribute("aria-expanded", String(open));
+  if (open) Object.keys(TEXT_FONTS).forEach(loadFont);  // so each choice previews in its own font
+}
+document.addEventListener("click", (e) => {
+  const step = e.target.closest("[data-size-step]");
+  if (step) {
+    const at = TEXT_SIZES.findIndex((z) => z >= settings().textSize - 0.001);
+    const next = TEXT_SIZES[Math.min(TEXT_SIZES.length - 1, Math.max(0, (at < 0 ? 1 : at) + Number(step.dataset.sizeStep)))];
+    setText("textSize", next);
+    return;
+  }
+  const pick = e.target.closest("[data-font-pick]");
+  if (pick) { setText("textFont", pick.dataset.fontPick); return; }
+  if (e.target.closest("#text-btn")) showTextPop(textPop.hidden);
+  else if (!textPop.hidden && !e.target.closest("#text-pop")) showTextPop(false);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !textPop.hidden) { showTextPop(false); textBtn.focus(); }
+});
+textPop.innerHTML = textControls();
+applyText();
+
 // ---------- back navigation ----------
 
 const backBtn = $("#back-btn");
@@ -211,6 +293,7 @@ function setScreen(name) {
   screen = name;
   backBtn.hidden = name === "home";
   themeBtn.hidden = name === "run" || name === "sheet";  // the timer needs the room on a phone
+  showTextPop(false);
   backBtn.setAttribute("aria-label", name === "run" && run.i > 0 ? "Previous question" : "Back to home");
   // One history entry above the start page, so the phone's back gesture stays inside the app.
   if (name !== "home" && !history.state?.n2p) history.pushState({ n2p: true }, "");
@@ -1125,6 +1208,9 @@ function renderSettings() {
           .map(([v, l]) => `<option value="${v}" ${s.theme === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       <div class="field"><label for="set-date">Exam date</label><input id="set-date" type="date" value="${esc(s.examDate)}"></div>
     </div>
+    <div class="panel">${textControls()}
+      <p class="note">Also under Aa in the top bar, including during a test.</p>
+    </div>
     <div class="panel">
       <h3>Fresh questions with Gemini</h3>
       <p class="note">With your own key from aistudio.google.com/apikey, the app writes new vocabulary, grammar, reading and listening questions on demand. The key is stored only in this browser and sent only to Google.</p>
@@ -1140,6 +1226,7 @@ function renderSettings() {
     </div>
   </div>`;
   const bind = (id, k, f = (v) => v) => $(id).addEventListener("change", (e) => { store.settings[k] = f(e.target.value.trim()); saveStore(); });
+  syncTextControls();
   $("#set-theme").addEventListener("change", (e) => setTheme(e.target.value));
   bind("#set-mode", "mode"); bind("#set-date", "examDate"); bind("#set-key", "key"); bind("#set-text", "textModel"); bind("#set-tts", "ttsModel");
   $("[data-test]").addEventListener("click", async () => {

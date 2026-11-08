@@ -12,10 +12,12 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Shippori+Mincho:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
 <link rel="stylesheet" href="style.css">
 <script>
-  // Apply a chosen theme before first paint so the page doesn't flash the other one.
+  // Apply the chosen theme and text size before first paint so the page doesn't flash.
   try {
-    const t = JSON.parse(localStorage.getItem("n2p.v1") || "{}").settings?.theme;
-    if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+    const s = JSON.parse(localStorage.getItem("n2p.v1") || "{}").settings || {};
+    if (s.theme === "light" || s.theme === "dark") document.documentElement.dataset.theme = s.theme;
+    if (s.textSize) document.documentElement.style.setProperty("--text-zoom", s.textSize);
+    if (s.textFont) document.documentElement.dataset.font = s.textFont;
   } catch {}
 </script>
 </head>
@@ -27,8 +29,10 @@
   </div>
   <div class="bar-end">
     <div class="bar-right" id="bar-right"></div>
+    <button class="bar-theme bar-text" id="text-btn" type="button" aria-label="Text size and font" aria-expanded="false" aria-controls="text-pop">Aa</button>
     <button class="bar-theme" id="theme-btn" type="button"></button>
   </div>
+  <div class="text-pop" id="text-pop" role="dialog" aria-label="Text size and font" hidden></div>
 </header>
 <main id="app" class="wrap" aria-live="polite">
   <p class="loading">問題を読み込んでいます…</p>
