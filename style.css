@@ -228,4 +228,15 @@ table.data td.num, table.data th.num { text-align: right; font-family: var(--fon
 .actions .btn { flex: 1; }
 .toast { font-size: 14px; color: var(--muted); }
 
+/* Exam answer sheet */
+.sheet { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); }
+.cell {
+  display: grid; justify-items: center; gap: 2px; padding: 6px 4px; min-height: 52px;
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px;
+}
+.cell span { font: 500 12px/1.2 var(--font-num); color: var(--muted); }
+.cell b { font: 500 16px/1.2 var(--font-num); color: var(--muted); }
+.cell.done { border-color: var(--accent); background: var(--accent-soft); }
+.cell.done b { color: var(--ink); }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

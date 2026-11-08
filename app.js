@@ -20,6 +20,17 @@ const TYPES = {
   task: "課題理解", point: "ポイント理解", summary: "概要理解", response: "即時応答",
 };
 
+// Full papers laid out like the real N2: [section, type, units]. The bank has no 語形成, so the
+// first paper is a few questions short of the real one and gets a little less than its 105 minutes.
+const MOCKS = {
+  lang: { jp: "言語知識・読解", en: "Vocabulary, grammar, reading", minutes: 100, parts: [
+    ["vocab", "kanji_reading", 5], ["vocab", "orthography", 5], ["vocab", "context", 7], ["vocab", "paraphrase", 5], ["vocab", "usage", 5],
+    ["grammar", "grammar_select", 12], ["grammar", "ordering", 5], ["grammar", "passage_grammar", 1],
+    ["reading", "short", 5], ["reading", "medium", 3], ["reading", "integrated", 1], ["reading", "long", 1], ["reading", "info", 1]] },
+  listen: { jp: "聴解", en: "Listening", minutes: 0, parts: [
+    ["listening", "task", 5], ["listening", "point", 6], ["listening", "summary", 5], ["listening", "response", 12], ["listening", "integrated", 4]] },
+};
+
 let units = [];      // bank items plus live-generated ones
 let patterns = [];   // grammar pattern names, for live generation
 let store = loadStore();
@@ -162,6 +173,9 @@ function setScreen(name) {
 }
 function goBack() {
   if (screen === "run" && run.i > 0) { run.i--; renderUnit(); }
+  else if (screen === "sheet") renderUnit();
+  else if (screen === "run" && run.reviewing) renderResults();
+  else if (!leaveOk()) setScreen(screen);  // stay; re-adds the history entry a back gesture used up
   else renderHome();
 }
 backBtn.addEventListener("click", goBack);
@@ -181,6 +195,14 @@ function renderHome() {
         <div class="countdown"><b>${days > 0 ? days : 0}</b><span>${days > 0 ? "days until the exam" : "exam day has passed"}</span></div>
       </section>
       <section class="sections">${Object.keys(SECTIONS).map(sectionCard).join("")}</section>
+      <article class="section-card">
+        <header><span class="jp">模擬試験</span><span class="eyebrow">Mock test</span></header>
+        <p class="note">Laid out like the real N2 paper. Change answers as often as you like and hand it in at the end; listening plays each item once. There's no 語形成 yet, so the first paper has 100 minutes instead of 105.</p>
+        <div class="row">
+          <button class="btn" type="button" data-mock="lang">言語知識・読解 · 100 min</button>
+          <button class="btn" type="button" data-mock="listen">聴解 · 32 items</button>
+        </div>
+      </article>
       <nav class="links">
         <button class="btn secondary" type="button" data-go="stats">Progress</button>
         <button class="btn secondary" type="button" data-go="settings">Settings</button>
@@ -189,6 +211,7 @@ function renderHome() {
     </div>`;
   app.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => (b.dataset.go === "stats" ? renderStats() : renderSettings())));
   for (const section of Object.keys(SECTIONS)) wireCard(section);
+  app.querySelectorAll("[data-mock]").forEach((b) => b.addEventListener("click", () => startMock(b.dataset.mock)));
 }
 
 function sectionCard(section) {
@@ -218,6 +241,7 @@ function sectionCard(section) {
       </div>
       <div class="row">
         <button class="btn" type="button" data-start>Start</button>
+        <button class="btn secondary" type="button" data-exam title="Change answers until you submit; results at the end">Exam</button>
         <button class="btn secondary" type="button" data-mistakes ${st.wrong ? "" : "disabled"}>Retry mistakes</button>
         ${settings().key ? `<button class="btn secondary" type="button" data-live>Fresh set</button>` : ""}
       </div>
@@ -236,6 +260,8 @@ function wireCard(section) {
   sel.addEventListener("change", () => { homeState.type[section] = sel.value; });
   const size = () => homeState.size[section] || meta.sizes[0];
   card.querySelector("[data-start]").addEventListener("click", () => startRun(section, pickUnits(section, size(), sel.value, false)));
+  const exam = () => startExam(section, pickUnits(section, size(), sel.value, false), exam);
+  card.querySelector("[data-exam]").addEventListener("click", exam);
   card.querySelector("[data-mistakes]").addEventListener("click", () => startRun(section, pickUnits(section, size(), sel.value, true)));
   card.querySelector("[data-live]")?.addEventListener("click", async (e) => {
     const toast = card.querySelector("[data-toast]");
@@ -255,16 +281,42 @@ function wireCard(section) {
 
 // ---------- drill ----------
 
-function startRun(section, list) {
+/**
+ * A set of questions. Practice marks each answer as you go; an exam (`exam: true`) lets you
+ * change answers, hides results until you submit, plays listening once, and has a time limit
+ * (`limit`, seconds; 0 = none). `again` starts another set like this one.
+ */
+function startRun(section, list, { exam = false, limit = 0, again } = {}) {
   if (!list.length) return;
-  run = { section, units: list, i: 0, results: [], start: Date.now() };
+  run = { section, units: list, i: 0, results: [], start: Date.now(), exam, limit, answers: {}, played: {},
+          again: again || (() => startRun(section, pickUnits(section, homeState.size[section] || SECTIONS[section].sizes[0], homeState.type[section], false))) };
   stopTimer();
   tick = setInterval(updateTimer, 1000);
   renderUnit();
 }
+const examLive = () => Boolean(run?.exam && !run.submitted);
+function startExam(section, list, again) {
+  startRun(section, list, { exam: true, limit: list.reduce((s, u) => s + paceFor(u), 0), again });
+}
+function startMock(key) {
+  const m = MOCKS[key];
+  const list = m.parts.flatMap(([section, type, n]) => pickUnits(section, n, type, false));
+  startRun(`mock-${key}`, list, { exam: true, limit: m.minutes * 60, again: () => startMock(key) });
+}
 
 function updateTimer() {
   if (!run) return;
+  if (run.reviewing) { barRight.innerHTML = `<span>Review ${run.i + 1}/${run.units.length}</span>`; return; }
+  if (examLive()) {
+    const spent = (Date.now() - run.start) / 1000;
+    const left = run.limit - spent;
+    if (run.limit && left <= 0) return submitExam(true);
+    const total = run.units.reduce((s, u) => s + qkeys(u).length, 0);
+    barRight.innerHTML = `<span title="Answered">${Object.keys(run.answers).length}/${total} done</span>` + (run.limit
+      ? `<span class="timer ${left < 300 ? "over" : ""}" title="Time left">${fmt(left)} left</span>`
+      : `<span class="timer" title="Time so far">${fmt(spent)}</span>`);
+    return;
+  }
   const unitT = (Date.now() - run.unitStart) / 1000;
   const pace = paceFor(run.units[run.i]);
   const over = pace && unitT > pace && !run.done;
@@ -289,13 +341,79 @@ function renderUnit() {
   window.scrollTo(0, 0);
   setActions(null);
   const head = `<div class="q-head"><span>${SECTIONS[u.section].jp} · ${TYPES[u.type] || u.type}${u.live ? " · fresh" : ""}</span><span>${esc(u.id)}</span></div>`;
-  if (u.section === "listening") return renderListening(u, head);
-  if (u.questions) return renderGroup(u, head);
-  app.innerHTML = `<div class="stack">${head}<p class="prompt">${esc(u.prompt || "")}</p>
-    <p class="stem ${u.type === "usage" ? "word" : ""}">${safeHTML(u.stem)}</p>
-    <div data-q></div></div>`;
-  mountQuestion($("[data-q]"), u, u.id, () => finishUnit());
+  if (u.section === "listening") renderListening(u, head);
+  else if (u.questions) renderGroup(u, head);
+  else {
+    app.innerHTML = `<div class="stack">${head}<p class="prompt">${esc(u.prompt || "")}</p>
+      <p class="stem ${u.type === "usage" ? "word" : ""}">${safeHTML(u.stem)}</p>
+      <div data-q></div></div>`;
+    mountQuestion($("[data-q]"), u, u.id, () => finishUnit());
+  }
+  if (examLive()) examActions();
 }
+
+// ---------- exam ----------
+
+function examActions() {
+  const last = run.i === run.units.length - 1;
+  const bar = setActions(`<button class="btn secondary" type="button" data-sheet>Answer sheet</button><button class="btn" type="button" data-next>${last ? "Finish" : "Next"}</button>`);
+  bar.querySelector("[data-sheet]").addEventListener("click", renderSheet);
+  bar.querySelector("[data-next]").addEventListener("click", () => {
+    if (last) return renderSheet();
+    run.i++;
+    renderUnit();
+  });
+}
+
+function renderSheet() {
+  player.pause();
+  setScreen("sheet");
+  window.scrollTo(0, 0);
+  let n = 0;
+  const cells = run.units.map((u, ui) => qkeys(u).map((k) => {
+    const a = run.answers[k];
+    return `<button class="cell ${a === undefined ? "" : "done"}" type="button" data-unit="${ui}"><span>${++n}</span><b>${a === undefined ? "–" : a + 1}</b></button>`;
+  }).join("")).join("");
+  const open = n - Object.keys(run.answers).length;
+  app.innerHTML = `<div class="stack">
+    <h1>Answer sheet</h1>
+    <p class="muted">${n - open} of ${n} answered. Tap a number to go back to that question.</p>
+    <div class="sheet">${cells}</div>
+    <p class="note" data-confirm hidden></p>
+  </div>`;
+  app.querySelectorAll("[data-unit]").forEach((b) => b.addEventListener("click", () => { run.i = Number(b.dataset.unit); renderUnit(); }));
+  const bar = setActions(`<button class="btn secondary" type="button" data-resume>Back to questions</button><button class="btn" type="button" data-submit>Submit</button>`);
+  bar.querySelector("[data-resume]").addEventListener("click", renderUnit);
+  let warned = false;
+  bar.querySelector("[data-submit]").addEventListener("click", () => {
+    if (open && !warned) {
+      warned = true;
+      const note = $("[data-confirm]");
+      note.hidden = false;
+      note.textContent = `${open} question${open > 1 ? "s are" : " is"} unanswered and will count as wrong. Press Submit again to hand it in.`;
+      return;
+    }
+    submitExam(false);
+  });
+}
+
+function submitExam(timeUp) {
+  run.submitted = true;
+  run.timeUp = timeUp;
+  for (const u of run.units) qkeys(u).forEach((key, k) => {
+    const q = questionsOf(u)[k];
+    const picked = run.answers[key] ?? -1;
+    record(key, picked === q.answer);
+    run.results.push({ key, unit: u, q, correct: picked === q.answer, picked });
+  });
+  renderResults();
+}
+
+/** Leaving an exam before submitting throws the answers away, so ask first. */
+function leaveOk() {
+  return !examLive() || !Object.keys(run.answers).length || confirm("Leave this exam? Your answers won't be saved.");
+}
+addEventListener("beforeunload", (e) => { if (examLive() && Object.keys(run.answers).length) e.preventDefault(); });
 
 /** Choices as mark-sheet rows. `spoken` hides the text until answered (listening). */
 function mountQuestion(el, q, key, onDone, { spoken = false } = {}) {
@@ -326,10 +444,24 @@ function mountQuestion(el, q, key, onDone, { spoken = false } = {}) {
       const full = q.stem.replace(/＿＿|★/g, () => `<u>${safeHTML(q.choices[q.order[n++]])}</u>`);
       extra = `<p>正しい文：${full}</p>`;
     }
-    v.innerHTML = `<strong>${correct ? "正解" : `不正解 · answer ${q.answer + 1}`}</strong>${extra}<p>${esc(q.explanation)}</p>`;
+    v.innerHTML = `<strong>${correct ? "正解" : `${k < 0 ? "未回答" : "不正解"} · answer ${q.answer + 1}`}</strong>${extra}<p>${esc(q.explanation)}</p>`;
     el.append(v);
     onDone();
   };
+  if (examLive()) {
+    // A mark sheet: tap to mark, tap another to change, tap the same one again to erase.
+    const mark = () => buttons.forEach((x, j) => {
+      x.classList.toggle("picked", run.answers[key] === j);
+      x.setAttribute("aria-pressed", run.answers[key] === j);
+    });
+    buttons.forEach((b, k) => b.addEventListener("click", () => {
+      if (run.answers[key] === k) delete run.answers[key];
+      else run.answers[key] = k;
+      mark();
+      updateTimer();
+    }));
+    return mark();
+  }
   // Coming back to a question already answered in this set shows that answer again.
   const prior = run.results.find((r) => r.key === key);
   if (prior) return reveal(prior.picked);
@@ -374,14 +506,15 @@ function watchPlayback(onFrame) {
 
 function renderListening(u, head) {
   const s = settings();
-  const exam = s.mode === "exam";
+  const strict = examLive();
+  const exam = strict || s.mode === "exam";
   const printed = u.choice_mode === "printed";
   app.innerHTML = `<div class="stack">${head}
     <div class="player">
       <button class="play" type="button" data-play>▶ Play</button>
       <div class="progress"><i data-bar></i></div>
       <div class="row" style="justify-content:space-between">
-        <span class="note">${exam ? "Exam mode: plays once." : "Practice mode: replay as often as you like."}</span>
+        <span class="note">${strict ? "Exam: plays once, by itself, with no pausing." : exam ? "Exam mode: plays once." : "Practice mode: replay as often as you like."}</span>
         ${exam ? "" : `<label class="note">Speed <select data-speed style="min-height:36px;border-radius:8px;border:1px solid var(--rule);background:var(--sheet);padding:4px 6px">
           ${[0.85, 1, 1.1].map((r) => `<option value="${r}" ${Number(s.speed) === r ? "selected" : ""}>${r}×</option>`).join("")}</select></label>`}
       </div>
@@ -395,6 +528,22 @@ function renderListening(u, head) {
   const bar = $("[data-bar]");
   let plays = 0;
   watchPlayback(() => { if (player.duration) bar.style.width = `${(player.currentTime / player.duration) * 100}%`; });
+  if (strict) {
+    stopAt = null;
+    const done = () => { playBtn.disabled = true; playBtn.textContent = "Played"; bar.style.width = "100%"; };
+    const once = () => player.play().then(() => {
+      run.played[u.id] = true;
+      playBtn.disabled = true;
+      playBtn.textContent = "Playing…";
+    }).catch(() => { playBtn.disabled = false; playBtn.textContent = "▶ Play (once)"; });
+    player.onplaying = player.onpause = null;
+    player.onended = done;
+    playBtn.addEventListener("click", once);
+    if (run.played[u.id]) done();
+    else { playBtn.disabled = true; once(); }  // the tap on Next counts as the gesture browsers want
+    mountQuestion($("[data-q]"), u, u.id, () => {}, { spoken: !printed });
+    return;
+  }
   playBtn.addEventListener("click", () => {
     if (!player.paused) { player.pause(); return; }
     if (player.ended || player.currentTime >= (player.duration || Infinity) - 0.05) player.currentTime = 0;
@@ -437,7 +586,7 @@ function showTranscript(u) {
 function finishUnit() {
   run.done = true;
   const last = run.i === run.units.length - 1;
-  const bar = setActions(`<button class="btn" type="button" data-next>${last ? "See results" : "Next"}</button>`);
+  const bar = setActions(`<button class="btn" type="button" data-next>${last ? (run.reviewing ? "Back to results" : "See results") : "Next"}</button>`);
   bar.querySelector("[data-next]").addEventListener("click", () => {
     if (last) return renderResults();
     run.i++;
@@ -448,12 +597,16 @@ function finishUnit() {
 function renderResults() {
   stopTimer(); setActions(null); player.pause();
   setScreen("results");
-  const secs = (Date.now() - run.start) / 1000;
+  run.end ??= Date.now();
+  const secs = (run.end - run.start) / 1000;
   const ok = run.results.filter((r) => r.correct).length;
   const n = run.results.length;
-  store.sessions.push({ t: Date.now(), section: run.section, n, ok, secs: Math.round(secs) });
-  store.sessions = store.sessions.slice(-300);
-  saveStore();
+  if (!run.saved) {  // coming back from Review answers shows the same set, not a new one
+    run.saved = true;
+    store.sessions.push({ t: Date.now(), section: run.section, n, ok, secs: Math.round(secs), ...(run.exam ? { exam: true } : {}) });
+    store.sessions = store.sessions.slice(-300);
+    saveStore();
+  }
   const byType = {};
   for (const r of run.results) {
     const t = TYPES[r.unit.type] || r.unit.type;
@@ -461,22 +614,28 @@ function renderResults() {
     byType[t][1]++; if (r.correct) byType[t][0]++;
   }
   const wrong = run.results.filter((r) => !r.correct);
-  const section = run.section;
   app.innerHTML = `<div class="stack">
-    <span class="eyebrow">${SECTIONS[section].jp} · ${SECTIONS[section].en}</span>
+    <span class="eyebrow">${sectionLabel(run.section)}${run.exam ? " · exam" : ""}</span>
     <div class="row" style="align-items:baseline;gap:14px"><span class="score">${ok}/${n}</span><span class="muted">${Math.round((ok / n) * 100)}% · ${fmt(secs)}</span></div>
+    ${run.timeUp ? `<p class="verdict bad">Time ran out, so the sheet was handed in automatically.</p>` : ""}
+    <div class="row"><button class="btn secondary" type="button" data-review>Review answers</button></div>
     <div class="table-wrap"><table class="data"><thead><tr><th>Type</th><th class="num">Correct</th></tr></thead><tbody>
       ${Object.entries(byType).map(([t, [a, b]]) => `<tr><td>${t}</td><td class="num">${a}/${b}</td></tr>`).join("")}
     </tbody></table></div>
     ${wrong.length ? `<h2>To review</h2><ul class="stack" style="list-style:none;padding:0;margin:0">${wrong.map((r) => `
       <li class="panel" style="gap:6px"><span class="note">${esc(r.key)} · ${TYPES[r.unit.type] || ""}</span>
       <span style="font-family:var(--font-text)">${safeHTML(r.q.stem || r.q.q || r.unit.question || r.unit.lines?.[0]?.text || "")}</span>
-      <span>Answer: <b>${r.q.answer + 1}. ${safeHTML(r.q.choices[r.q.answer])}</b> · yours: ${r.picked + 1}</span>
+      <span>Answer: <b>${r.q.answer + 1}. ${safeHTML(r.q.choices[r.q.answer])}</b> · yours: ${r.picked < 0 ? "none" : r.picked + 1}</span>
       <span class="note">${esc(r.q.explanation)}</span></li>`).join("")}</ul>` : `<p>All correct.</p>`}
   </div>`;
   const bar = setActions(`<button class="btn secondary" type="button" data-home>Home</button><button class="btn" type="button" data-again>Next set</button>`);
   bar.querySelector("[data-home]").addEventListener("click", renderHome);
-  bar.querySelector("[data-again]").addEventListener("click", () => startRun(section, pickUnits(section, homeState.size[section] || SECTIONS[section].sizes[0], homeState.type[section], false)));
+  bar.querySelector("[data-again]").addEventListener("click", run.again);
+  $("[data-review]").addEventListener("click", () => { run.reviewing = true; run.i = 0; renderUnit(); });
+}
+function sectionLabel(section) {
+  if (SECTIONS[section]) return `${SECTIONS[section].jp} · ${SECTIONS[section].en}`;
+  return `模擬試験 · ${MOCKS[section.replace("mock-", "")]?.jp || ""}`;
 }
 
 // ---------- progress ----------
@@ -505,7 +664,7 @@ function renderStats() {
     </tbody></table></div>` : `<p class="muted">Finish a set to see results by question type.</p>`}
     <h2>Recent sets</h2>
     ${recent.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>When</th><th>Section</th><th class="num">Score</th><th class="num">Time</th></tr></thead><tbody>
-      ${recent.map((r) => `<tr><td>${new Date(r.t).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</td><td>${SECTIONS[r.section]?.jp || r.section}</td><td class="num">${r.ok}/${r.n}</td><td class="num">${fmt(r.secs)}</td></tr>`).join("")}
+      ${recent.map((r) => `<tr><td>${new Date(r.t).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</td><td>${SECTIONS[r.section]?.jp || (r.section.startsWith("mock-") ? "模試 " + (MOCKS[r.section.slice(5)]?.jp || "") : r.section)}${r.exam ? " · exam" : ""}</td><td class="num">${r.ok}/${r.n}</td><td class="num">${fmt(r.secs)}</td></tr>`).join("")}
     </tbody></table></div>` : `<p class="muted">No sets yet.</p>`}
     <div class="panel">
       <h3>Backup</h3>
@@ -551,9 +710,9 @@ function renderSettings() {
   app.innerHTML = `<div class="stack">
     <h1>Settings</h1>
     <div class="panel">
-      <div class="field"><label for="set-mode">Listening mode</label>
-        <select id="set-mode"><option value="practice" ${s.mode === "practice" ? "selected" : ""}>Practice: replay, change speed</option>
-        <option value="exam" ${s.mode === "exam" ? "selected" : ""}>Exam: play once at normal speed</option></select></div>
+      <div class="field"><label for="set-mode">Listening in practice sets</label>
+        <select id="set-mode"><option value="practice" ${s.mode === "practice" ? "selected" : ""}>Replay and change speed</option>
+        <option value="exam" ${s.mode === "exam" ? "selected" : ""}>Play once at normal speed</option></select></div>
       <div class="field"><label for="set-date">Exam date</label><input id="set-date" type="date" value="${esc(s.examDate)}"></div>
     </div>
     <div class="panel">
@@ -760,13 +919,8 @@ function wavBlob(chunks, rate) {
 
 // ---------- boot ----------
 
-$("#home-btn").addEventListener("click", () => {
-  if (run && !run.finished && run.results.length) {
-    // Leaving mid-set keeps the answers already given; they're recorded as you go.
-    run = null;
-  }
-  renderHome();
-});
+// Leaving a practice set keeps the answers already given; they're recorded as you go.
+$("#home-btn").addEventListener("click", () => { if (leaveOk()) renderHome(); });
 
 (async function boot() {
   try {

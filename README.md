@@ -17,8 +17,12 @@ explanations for every choice, built for phone and desktop.
 All questions are original, written for this app and checked by a second, blind solve.
 Listening audio is Gemini text-to-speech with a different random cast for every item.
 
-- **Listening practice mode** lets you replay and slow down; **exam mode** plays once.
-  After you answer, the transcript appears with English, and tapping a line replays it.
+- **Practice** shows the answer and explanations after each question. In listening you can
+  replay and slow down; after you answer, the transcript appears with English, and tapping
+  a line replays it.
+- **Exam** (on each section) and **Mock test** (laid out like the real paper) work like the
+  real test: change your answers until you submit, results only at the end, a time limit,
+  and listening plays each item once. Review answers afterwards to see the explanations.
 - **Progress** (scores, questions to retry) is kept in your browser. Use Export / Import
   on the Progress page to back it up or move it to another device.
 - **Fresh questions:** add your own Gemini API key in Settings to generate new sets on
