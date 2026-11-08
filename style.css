@@ -13,7 +13,14 @@
   --bad: #b3261e;
   --bad-soft: #fbe5e3;
   --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", "Yu Gothic", system-ui, sans-serif;
-  --font-text: "Shippori Mincho", "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
+  --font-mincho: "Shippori Mincho", "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
+  --font-gothic: var(--font-body);
+  --font-ud: "BIZ UDPGothic", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  /* Installed textbook fonts first (Office's HGS教科書体, Windows' UD デジタル 教科書体, the Mac's
+     downloadable 游教科書体 and Klee), then Klee One from the web. TEXTBOOK_LOCAL in app.js mirrors it. */
+  --font-textbook: "HGS教科書体", "HGSKyokashotai", "HG教科書体", "HGKyokashotai",
+    "UD デジタル 教科書体 N-R", "UD Digi Kyokasho N-R", "YuKyokasho Yoko", "YuKyokasho", "Klee", "Klee One", serif;
+  --font-text: var(--font-mincho);
   --font-num: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --radius: 10px;
   color-scheme: light;
@@ -82,9 +89,9 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 /* Text size and font. Every size in this sheet is px, so zooming the content column scales
    questions, passages and buttons together while the top and bottom bars stay put. */
 #app { zoom: var(--text-zoom, 1); }
-:root[data-font="gothic"] { --font-text: var(--font-body); }
-:root[data-font="ud"] { --font-text: "BIZ UDPGothic", "Hiragino Sans", "Noto Sans JP", sans-serif; }
-:root[data-font="textbook"] { --font-text: "Klee One", "Hiragino Mincho ProN", "Yu Mincho", serif; }
+:root[data-font="gothic"] { --font-text: var(--font-gothic); }
+:root[data-font="ud"] { --font-text: var(--font-ud); }
+:root[data-font="textbook"] { --font-text: var(--font-textbook); }
 .text-pop {
   position: absolute; top: calc(100% + 6px); right: max(16px, env(safe-area-inset-right, 0px));
   width: min(340px, calc(100vw - 32px)); display: grid; gap: 16px; padding: 16px;

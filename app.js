@@ -208,12 +208,32 @@ applyTheme();
 
 const TEXT_SIZES = [0.85, 1, 1.15, 1.3, 1.5, 1.75];
 // The font for Japanese question text; English and interface text keep the body font.
+// Each stack is a --font-* variable in style.css.
 const TEXT_FONTS = {
-  mincho: { name: "明朝", note: "Exam paper", family: "'Shippori Mincho', serif" },
-  gothic: { name: "ゴシック", note: "Plain", family: "'Zen Kaku Gothic New', sans-serif" },
-  ud: { name: "UDゴシック", note: "Easy to read", family: "'BIZ UDPGothic', sans-serif", load: "BIZ+UDPGothic:wght@400;700" },
-  textbook: { name: "手書き風", note: "Clear strokes", family: "'Klee One', serif", load: "Klee+One:wght@400;600" },
+  mincho: { name: "明朝", note: "Exam paper" },
+  gothic: { name: "ゴシック", note: "Plain" },
+  ud: { name: "UDゴシック", note: "Easy to read", load: "BIZ+UDPGothic:wght@400;700" },
+  textbook: { name: "教科書体", note: "Like your Anki deck", load: "Klee+One:wght@400;600" },
 };
+// The installed textbook fonts --font-textbook tries before falling back to Klee One from the web,
+// as [CSS family name, name to show]. Kept in the same order as that stack.
+const TEXTBOOK_LOCAL = [
+  ["HGS教科書体", "HGS教科書体"], ["HGSKyokashotai", "HGS教科書体"], ["HG教科書体", "HG教科書体"], ["HGKyokashotai", "HG教科書体"],
+  ["UD デジタル 教科書体 N-R", "UD デジタル 教科書体"], ["UD Digi Kyokasho N-R", "UD デジタル 教科書体"],
+  ["YuKyokasho Yoko", "游教科書体"], ["YuKyokasho", "游教科書体"], ["Klee", "Klee"],
+];
+let textbookFound;
+function installedTextbook() {
+  // A local font can't be queried directly, so compare text widths against two generic fallbacks.
+  // Latin glyphs, because a font's kanji are all the same full width.
+  if (textbookFound !== undefined) return textbookFound;
+  const ctx = document.createElement("canvas").getContext("2d");
+  const sample = "mmmmmmmmmmlliWW 0123 教科書";
+  const width = (font) => { ctx.font = `40px ${font}`; return ctx.measureText(sample).width; };
+  const has = (family) => ["monospace", "serif"].some((g) => width(`"${family}", ${g}`) !== width(g));
+  textbookFound = TEXTBOOK_LOCAL.find(([family]) => has(family))?.[1] || null;
+  return textbookFound;
+}
 const textBtn = $("#text-btn");
 const textPop = $("#text-pop");
 
@@ -236,8 +256,9 @@ function textControls() {
     </section>
     <section class="text-set"><h3>Japanese font</h3>
       <div class="font-grid">${Object.entries(TEXT_FONTS).map(([k, f]) => `
-        <button class="chip" type="button" data-font-pick="${k}"><b style="font-family:${f.family}">日本語</b><span>${f.name}</span><span>${f.note}</span></button>`).join("")}
+        <button class="chip" type="button" data-font-pick="${k}"><b style="font-family:var(--font-${k})">日本語</b><span>${f.name}</span><span>${f.note}</span></button>`).join("")}
       </div>
+      <p class="note">教科書体 here: <span data-textbook-found></span></p>
     </section>`;
 }
 function syncTextControls() {
@@ -247,6 +268,10 @@ function syncTextControls() {
     b.disabled = b.dataset.sizeStep < 0 ? textSize <= TEXT_SIZES[0] : textSize >= TEXT_SIZES.at(-1);
   });
   document.querySelectorAll("[data-font-pick]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.fontPick === textFont)));
+  const found = installedTextbook();
+  document.querySelectorAll("[data-textbook-found]").forEach((s) => {
+    s.textContent = found ? `${found}, installed on this device.` : "Klee One, a free look-alike (no textbook font installed on this device).";
+  });
 }
 function applyText() {
   const { textSize, textFont } = settings();
