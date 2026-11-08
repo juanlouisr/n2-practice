@@ -14,21 +14,28 @@ const SECTIONS = {
   listening: { jp: "聴解", en: "Listening", sizes: [5, 10, 15], pace: 0 },
 };
 const TYPES = {
-  kanji_reading: "漢字読み", orthography: "表記", context: "文脈規定", paraphrase: "言い換え類義", usage: "用法",
+  kanji_reading: "漢字読み", orthography: "表記", word_formation: "語形成", context: "文脈規定", paraphrase: "言い換え類義", usage: "用法",
   grammar_select: "文の文法1", ordering: "並べ替え", passage_grammar: "文章の文法",
   short: "短文", medium: "中文", integrated: "統合理解", long: "長文", info: "情報検索",
-  task: "課題理解", point: "ポイント理解", summary: "概要理解", response: "即時応答",
+  task: "課題理解", point: "ポイント理解", summary: "概要理解", response: "即時応答", integrated_pair: "統合理解 (質問1・2)",
 };
 
-// Full papers laid out like the real N2: [section, type, units]. The bank has no 語形成, so the
-// first paper is a few questions short of the real one and gets a little less than its 105 minutes.
+// The real N2 paper: questions per type, in the order they appear. Mock and custom tests are
+// cut from this, so a smaller test keeps the same mix.
+const PAPER = {
+  lang: [["vocab", "kanji_reading", 5], ["vocab", "orthography", 5], ["vocab", "word_formation", 3], ["vocab", "context", 7],
+    ["vocab", "paraphrase", 5], ["vocab", "usage", 5], ["grammar", "grammar_select", 12], ["grammar", "ordering", 5], ["grammar", "passage_grammar", 5]],
+  reading: [["reading", "short", 5], ["reading", "medium", 9], ["reading", "integrated", 2], ["reading", "long", 3], ["reading", "info", 2]],
+  listening: [["listening", "task", 5], ["listening", "point", 6], ["listening", "summary", 5], ["listening", "response", 12],
+    ["listening", "integrated", 2], ["listening", "integrated_pair", 2]],
+};
+const PART_NAMES = { lang: "言語知識", reading: "読解", listening: "聴解" };
+// The real paper gives 105 minutes to 52 language-knowledge and 21 reading questions; a common
+// split is about 35 minutes for the first and 70 for the second. Listening runs on the audio.
+const PART_SECS = { lang: 40, reading: 200, listening: 0 };
 const MOCKS = {
-  lang: { jp: "言語知識・読解", en: "Vocabulary, grammar, reading", minutes: 100, parts: [
-    ["vocab", "kanji_reading", 5], ["vocab", "orthography", 5], ["vocab", "context", 7], ["vocab", "paraphrase", 5], ["vocab", "usage", 5],
-    ["grammar", "grammar_select", 12], ["grammar", "ordering", 5], ["grammar", "passage_grammar", 1],
-    ["reading", "short", 5], ["reading", "medium", 3], ["reading", "integrated", 1], ["reading", "long", 1], ["reading", "info", 1]] },
-  listen: { jp: "聴解", en: "Listening", minutes: 0, parts: [
-    ["listening", "task", 5], ["listening", "point", 6], ["listening", "summary", 5], ["listening", "response", 12], ["listening", "integrated", 4]] },
+  lang: { jp: "言語知識・読解", parts: { lang: 52, reading: 21 } },
+  listen: { jp: "聴解", parts: { listening: 32 } },
 };
 
 let units = [];      // bank items plus live-generated ones
@@ -54,6 +61,7 @@ function settings() {
   return Object.assign({
     mode: "practice", speed: 1, examDate: "2026-12-06", key: "",
     textModel: "gemini-3.8-flash", ttsModel: "gemini-3.8-flash-tts",
+    custom: { lang: 20, reading: 8, listening: 10, minutes: 30, exam: true, minutesSet: false }, theme: "system",
   }, store.settings);
 }
 function loadLive() {
@@ -160,6 +168,34 @@ function pickUnits(section, n, type, mistakes) {
 
 const homeState = { size: {}, type: {} };
 
+// ---------- theme ----------
+
+const themeBtn = $("#theme-btn");
+const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+const PAPER_COLOR = { light: "#f4f5f1", dark: "#131614" };  // --paper, for the browser's own toolbar
+const themeIsDark = () => (settings().theme === "system" ? darkQuery.matches : settings().theme === "dark");
+function applyTheme() {
+  const t = settings().theme;
+  if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
+  const dark = themeIsDark();
+  themeBtn.textContent = dark ? "☀" : "☾";
+  themeBtn.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => {
+    m.content = t === "system" ? PAPER_COLOR[m.media.includes("dark") ? "dark" : "light"] : PAPER_COLOR[t];
+  });
+}
+function setTheme(t) {
+  store.settings.theme = t;
+  saveStore();
+  applyTheme();
+  const sel = $("#set-theme");
+  if (sel) sel.value = t;
+}
+themeBtn.addEventListener("click", () => setTheme(themeIsDark() ? "light" : "dark"));
+darkQuery.addEventListener("change", applyTheme);
+applyTheme();
+
 // ---------- back navigation ----------
 
 const backBtn = $("#back-btn");
@@ -167,6 +203,7 @@ let screen = "home";
 function setScreen(name) {
   screen = name;
   backBtn.hidden = name === "home";
+  themeBtn.hidden = name === "run" || name === "sheet";  // the timer needs the room on a phone
   backBtn.setAttribute("aria-label", name === "run" && run.i > 0 ? "Previous question" : "Back to home");
   // One history entry above the start page, so the phone's back gesture stays inside the app.
   if (name !== "home" && !history.state?.n2p) history.pushState({ n2p: true }, "");
@@ -197,12 +234,13 @@ function renderHome() {
       <section class="sections">${Object.keys(SECTIONS).map(sectionCard).join("")}</section>
       <article class="section-card">
         <header><span class="jp">模擬試験</span><span class="eyebrow">Mock test</span></header>
-        <p class="note">Laid out like the real N2 paper. Change answers as often as you like and hand it in at the end; listening plays each item once. There's no 語形成 yet, so the first paper has 100 minutes instead of 105.</p>
+        <p class="note">Laid out like the real N2 paper. Change answers as often as you like and hand it in at the end; listening plays each item once.</p>
         <div class="row">
-          <button class="btn" type="button" data-mock="lang">言語知識・読解 · 100 min</button>
-          <button class="btn" type="button" data-mock="listen">聴解 · 32 items</button>
+          <button class="btn" type="button" data-mock="lang">言語知識・読解 · ${Math.round(suggestedSecs(MOCKS.lang.parts) / 60)} min</button>
+          <button class="btn" type="button" data-mock="listen">聴解 · ${MOCKS.listen.parts.listening} questions</button>
         </div>
       </article>
+      ${customCard()}
       <nav class="links">
         <button class="btn secondary" type="button" data-go="stats">Progress</button>
         <button class="btn secondary" type="button" data-go="settings">Settings</button>
@@ -212,13 +250,89 @@ function renderHome() {
   app.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => (b.dataset.go === "stats" ? renderStats() : renderSettings())));
   for (const section of Object.keys(SECTIONS)) wireCard(section);
   app.querySelectorAll("[data-mock]").forEach((b) => b.addEventListener("click", () => startMock(b.dataset.mock)));
+  wireCustom();
+}
+
+/** Questions available for each part of a test, so the inputs can't ask for more. */
+function partSizes() {
+  const n = {};
+  for (const [part, blueprint] of Object.entries(PAPER)) {
+    n[part] = blueprint.reduce((s, [section, type]) => s + units.filter((u) => u.section === section && u.type === type && !u.live)
+      .reduce((t, u) => t + qkeys(u).length, 0), 0);
+  }
+  return n;
+}
+function customCard() {
+  const c = settings().custom;
+  const max = partSizes();
+  const input = (part, en) => `<div class="count-row">
+      <label for="cu-${part}"><span class="jp-label">${PART_NAMES[part]}</span> <span class="note">${en}</span></label>
+      <input id="cu-${part}" type="number" inputmode="numeric" min="0" max="${max[part]}" step="1" value="${c[part]}" data-part="${part}">
+    </div>`;
+  return `<article class="section-card" data-custom>
+      <header><span class="jp">カスタム</span><span class="eyebrow">Custom test</span></header>
+      <p class="note">Pick how many questions of each part. They're mixed like the real paper, in the same order.</p>
+      <div class="counts">
+        ${input("lang", "vocabulary & grammar")}
+        ${input("reading", "reading")}
+        ${input("listening", "listening")}
+      </div>
+      <div class="row" role="group" aria-label="Mode">
+        <button class="chip" type="button" data-cmode="exam" aria-pressed="${c.exam}">Exam</button>
+        <button class="chip" type="button" data-cmode="practice" aria-pressed="${!c.exam}">Practice</button>
+      </div>
+      <div class="count-row" data-minutes-row ${c.exam ? "" : "hidden"}>
+        <label for="cu-minutes">Time limit <span class="note">minutes · 0 for none</span></label>
+        <input id="cu-minutes" type="number" inputmode="numeric" min="0" step="1" value="${c.minutes}">
+      </div>
+      <p class="note" data-custom-note></p>
+      <button class="btn" type="button" data-custom-start>Start custom test</button>
+    </article>`;
+}
+function wireCustom() {
+  const card = app.querySelector("[data-custom]");
+  const max = partSizes();
+  const c = { ...settings().custom };
+  const save = () => { store.settings.custom = { ...c }; saveStore(); };
+  const note = card.querySelector("[data-custom-note]");
+  const start = card.querySelector("[data-custom-start]");
+  const minutes = card.querySelector("#cu-minutes");
+  const refresh = () => {
+    // Until you type your own limit, it follows the real exam's pace for the questions chosen.
+    if (!c.minutesSet) { c.minutes = Math.round(suggestedSecs(c) / 60); minutes.value = c.minutes; }
+    const n = c.lang + c.reading + c.listening;
+    start.disabled = !n;
+    note.textContent = !n ? "Choose at least one question."
+      : `${n} questions${c.exam ? (c.minutes ? ` · ${c.minutes} min` : " · no time limit") : " · answers shown as you go"}${c.listening && c.exam ? " · listening plays once" : ""}.`;
+    save();
+  };
+  card.querySelectorAll("[data-part]").forEach((el) => el.addEventListener("input", () => {
+    const part = el.dataset.part;
+    c[part] = Math.max(0, Math.min(max[part], Math.floor(Number(el.value) || 0)));
+    refresh();
+  }));
+  card.querySelectorAll("[data-part]").forEach((el) => el.addEventListener("change", () => { el.value = c[el.dataset.part]; }));
+  minutes.addEventListener("input", () => {
+    c.minutes = Math.max(0, Math.floor(Number(minutes.value) || 0));
+    c.minutesSet = minutes.value !== "";
+    refresh();
+  });
+  card.querySelectorAll("[data-cmode]").forEach((b) => b.addEventListener("click", () => {
+    c.exam = b.dataset.cmode === "exam";
+    card.querySelectorAll("[data-cmode]").forEach((x) => x.setAttribute("aria-pressed", x === b));
+    card.querySelector("[data-minutes-row]").hidden = !c.exam;
+    refresh();
+  }));
+  start.addEventListener("click", startCustom);
+  refresh();
 }
 
 function sectionCard(section) {
   const meta = SECTIONS[section];
   const st = sectionStats(section);
   const size = homeState.size[section] || meta.sizes[0];
-  const types = [...new Set(units.filter((u) => u.section === section).map((u) => u.type))];
+  const order = Object.values(PAPER).flat().filter((b) => b[0] === section).map((b) => b[1]);
+  const types = [...new Set(units.filter((u) => u.section === section).map((u) => u.type))].sort((a, b) => order.indexOf(a) - order.indexOf(b));
   const pct = st.total ? (st.seen / st.total) * 100 : 0;
   return `
     <article class="section-card" data-section="${section}">
@@ -298,10 +412,51 @@ const examLive = () => Boolean(run?.exam && !run.submitted);
 function startExam(section, list, again) {
   startRun(section, list, { exam: true, limit: list.reduce((s, u) => s + paceFor(u), 0), again });
 }
+/**
+ * Questions for a test of `counts` ({lang, reading, listening} → number of questions), split over
+ * the types in the real paper's proportions and order. A passage is taken only if all its
+ * questions fit; what a type can't fill passes to the next type, then round again from the top.
+ */
+function compose(counts) {
+  const list = [];
+  for (const [part, blueprint] of Object.entries(PAPER)) {
+    const n = counts[part] || 0;
+    if (!n) continue;
+    const total = blueprint.reduce((s, b) => s + b[2], 0);
+    // Largest remainder, so the per-type targets add up to n exactly.
+    const raw = blueprint.map((b) => (b[2] * n) / total);
+    const want = raw.map(Math.floor);
+    raw.map((r, k) => [r - want[k], k]).sort((a, b) => b[0] - a[0]).slice(0, n - want.reduce((s, x) => s + x, 0))
+      .forEach(([, k]) => want[k]++);
+    const picked = blueprint.map(() => []);
+    const pools = blueprint.map(([section, type]) => pickUnits(section, Infinity, type, false));
+    let carry = 0;
+    for (let pass = 0; pass < 2; pass++) {
+      blueprint.forEach((_, k) => {
+        let room = (pass ? 0 : want[k]) + carry;
+        for (const u of pools[k]) {
+          const size = qkeys(u).length;
+          if (size > room || picked[k].includes(u)) continue;
+          picked[k].push(u);
+          room -= size;
+          if (!room) break;
+        }
+        carry = room;
+      });
+    }
+    list.push(...picked.flat());
+  }
+  return list;
+}
+const suggestedSecs = (counts) => Object.keys(PAPER).reduce((s, p) => s + (counts[p] || 0) * PART_SECS[p], 0);
 function startMock(key) {
-  const m = MOCKS[key];
-  const list = m.parts.flatMap(([section, type, n]) => pickUnits(section, n, type, false));
-  startRun(`mock-${key}`, list, { exam: true, limit: m.minutes * 60, again: () => startMock(key) });
+  const parts = MOCKS[key].parts;
+  startRun(`mock-${key}`, compose(parts), { exam: true, limit: suggestedSecs(parts), again: () => startMock(key) });
+}
+function startCustom() {
+  const c = settings().custom;
+  const go = () => startRun("custom", compose(c), { exam: c.exam, limit: c.exam ? c.minutes * 60 : 0, again: go });
+  go();
 }
 
 function updateTimer() {
@@ -541,7 +696,7 @@ function renderListening(u, head) {
     playBtn.addEventListener("click", once);
     if (run.played[u.id]) done();
     else { playBtn.disabled = true; once(); }  // the tap on Next counts as the gesture browsers want
-    mountQuestion($("[data-q]"), u, u.id, () => {}, { spoken: !printed });
+    mountListeningQuestions(u, printed, () => {});
     return;
   }
   playBtn.addEventListener("click", () => {
@@ -559,7 +714,21 @@ function renderListening(u, head) {
     player.playbackRate = Number(e.target.value);
     store.settings.speed = Number(e.target.value); saveStore();
   });
-  mountQuestion($("[data-q]"), u, u.id, () => { finishUnit(); showTranscript(u); }, { spoken: !printed });
+  mountListeningQuestions(u, printed, () => { finishUnit(); showTranscript(u); });
+}
+
+/** One question, or 質問1・2 with the same printed choices (their wording is only spoken). */
+function mountListeningQuestions(u, printed, onAll) {
+  const box = $("[data-q]");
+  if (!u.questions) return mountQuestion(box, u, u.id, onAll, { spoken: !printed });
+  let answered = 0;
+  u.questions.forEach((q, k) => {
+    const div = document.createElement("div");
+    div.className = "subq";
+    div.innerHTML = `<h3>質問${k + 1}</h3>`;
+    box.append(div);
+    mountQuestion(div, q, `${u.id}#${k + 1}`, () => { if (++answered === u.questions.length) onAll(); });
+  });
 }
 
 function showTranscript(u) {
@@ -570,6 +739,7 @@ function showTranscript(u) {
   if (u.setup) html += row("ナレ", u.setup, "", seg("setup"));
   u.lines.forEach((l, i) => { html += row(l.speaker, l.text, l.en, seg("line", i)); });
   if (u.question) html += row("ナレ", u.question, "", seg("question"));
+  (u.questions || []).forEach((q, k) => { html += row("ナレ", q.q, "", seg("question", k)); });
   if (u.choice_mode === "spoken") u.choices.forEach((c, i) => { html += row(`${i + 1}`, c, "", seg("choice", i)); });
   const box = $("[data-transcript]");
   box.innerHTML = `<div class="panel"><h3>Transcript <span class="note">· tap a line to hear it again</span></h3><ul class="transcript">${html}</ul></div>`;
@@ -633,9 +803,11 @@ function renderResults() {
   bar.querySelector("[data-again]").addEventListener("click", run.again);
   $("[data-review]").addEventListener("click", () => { run.reviewing = true; run.i = 0; renderUnit(); });
 }
-function sectionLabel(section) {
-  if (SECTIONS[section]) return `${SECTIONS[section].jp} · ${SECTIONS[section].en}`;
-  return `模擬試験 · ${MOCKS[section.replace("mock-", "")]?.jp || ""}`;
+function sectionLabel(section, short = false) {
+  if (SECTIONS[section]) return short ? SECTIONS[section].jp : `${SECTIONS[section].jp} · ${SECTIONS[section].en}`;
+  if (section === "custom") return short ? "カスタム" : "カスタム · Custom test";
+  const m = MOCKS[section.replace("mock-", "")];
+  return short ? `模試 ${m?.jp || ""}` : `模擬試験 · ${m?.jp || ""}`;
 }
 
 // ---------- progress ----------
@@ -664,7 +836,7 @@ function renderStats() {
     </tbody></table></div>` : `<p class="muted">Finish a set to see results by question type.</p>`}
     <h2>Recent sets</h2>
     ${recent.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>When</th><th>Section</th><th class="num">Score</th><th class="num">Time</th></tr></thead><tbody>
-      ${recent.map((r) => `<tr><td>${new Date(r.t).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</td><td>${SECTIONS[r.section]?.jp || (r.section.startsWith("mock-") ? "模試 " + (MOCKS[r.section.slice(5)]?.jp || "") : r.section)}${r.exam ? " · exam" : ""}</td><td class="num">${r.ok}/${r.n}</td><td class="num">${fmt(r.secs)}</td></tr>`).join("")}
+      ${recent.map((r) => `<tr><td>${new Date(r.t).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</td><td>${esc(sectionLabel(r.section, true))}${r.exam ? " · exam" : ""}</td><td class="num">${r.ok}/${r.n}</td><td class="num">${fmt(r.secs)}</td></tr>`).join("")}
     </tbody></table></div>` : `<p class="muted">No sets yet.</p>`}
     <div class="panel">
       <h3>Backup</h3>
@@ -713,6 +885,9 @@ function renderSettings() {
       <div class="field"><label for="set-mode">Listening in practice sets</label>
         <select id="set-mode"><option value="practice" ${s.mode === "practice" ? "selected" : ""}>Replay and change speed</option>
         <option value="exam" ${s.mode === "exam" ? "selected" : ""}>Play once at normal speed</option></select></div>
+      <div class="field"><label for="set-theme">Theme</label>
+        <select id="set-theme">${[["system", "Match this device"], ["light", "Light"], ["dark", "Dark"]]
+          .map(([v, l]) => `<option value="${v}" ${s.theme === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       <div class="field"><label for="set-date">Exam date</label><input id="set-date" type="date" value="${esc(s.examDate)}"></div>
     </div>
     <div class="panel">
@@ -730,6 +905,7 @@ function renderSettings() {
     </div>
   </div>`;
   const bind = (id, k, f = (v) => v) => $(id).addEventListener("change", (e) => { store.settings[k] = f(e.target.value.trim()); saveStore(); });
+  $("#set-theme").addEventListener("change", (e) => setTheme(e.target.value));
   bind("#set-mode", "mode"); bind("#set-date", "examDate"); bind("#set-key", "key"); bind("#set-text", "textModel"); bind("#set-tts", "ttsModel");
   $("[data-test]").addEventListener("click", async () => {
     const msg = $("[data-test-msg]");

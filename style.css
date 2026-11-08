@@ -70,6 +70,12 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .bar-home { background: none; border: 0; padding: 4px 0; font-weight: 700; font-size: 17px; letter-spacing: .02em; white-space: nowrap; }
 @media (max-width: 400px) { .bar-back:not([hidden]) + .bar-home span { display: none; } }
 .bar-home span { font-weight: 500; color: var(--muted); }
+.bar-end { display: flex; align-items: center; gap: 10px; }
+.bar-theme {
+  width: 36px; height: 36px; flex: none; display: grid; place-items: center; padding: 0;
+  border: 1px solid var(--rule); border-radius: 50%; background: var(--sheet); color: var(--ink); font-size: 17px; line-height: 1;
+}
+.bar-theme[hidden] { display: none; }
 .bar-right { display: flex; align-items: center; gap: 10px; font-family: var(--font-num); font-size: 14px; color: var(--muted); }
 .timer { font-variant-numeric: tabular-nums; }
 .timer.over { color: var(--bad); }
@@ -227,6 +233,17 @@ table.data td.num, table.data th.num { text-align: right; font-family: var(--fon
 .actions .inner { max-width: 720px; margin: 0 auto; display: flex; gap: 8px; }
 .actions .btn { flex: 1; }
 .toast { font-size: 14px; color: var(--muted); }
+
+/* Custom test */
+.counts { display: grid; gap: 10px; }
+.count-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.count-row[hidden] { display: none; }
+.count-row label { min-width: 0; }
+.count-row input {
+  width: 88px; min-height: 44px; flex: none; padding: 6px 10px; text-align: right;
+  border: 1px solid var(--rule); border-radius: 8px; background: var(--sheet); font: 500 16px var(--font-num);
+}
+.jp-label { font-weight: 700; }
 
 /* Exam answer sheet */
 .sheet { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); }

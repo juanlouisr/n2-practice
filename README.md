@@ -9,10 +9,10 @@ explanations for every choice, built for phone and desktop.
 
 | Section | Question types | Built-in |
 |---|---|---|
-| 語彙 Vocabulary | 漢字読み, 表記, 文脈規定, 言い換え類義, 用法 | 125 |
-| 文法 Grammar | 文の文法1 (one per N2 pattern), 並べ替え, 文章の文法 | 243 |
-| 読解 Reading | 短文, 中文, 統合理解, 長文, 情報検索 | 49 questions in 25 passages |
-| 聴解 Listening | 課題理解, ポイント理解, 概要理解, 即時応答, 統合理解 | 68 |
+| 語彙 Vocabulary | 漢字読み, 表記, 語形成, 文脈規定, 言い換え類義, 用法 | 435 |
+| 文法 Grammar | 文の文法1 (two per N2 pattern), 並べ替え, 文章の文法 | 532 |
+| 読解 Reading | 短文, 中文, 統合理解, 長文, 情報検索 | 147 questions in 75 passages |
+| 聴解 Listening | 課題理解, ポイント理解, 概要理解, 即時応答, 統合理解 (incl. 質問1・2) | 228 questions in 216 items |
 
 All questions are original, written for this app and checked by a second, blind solve.
 Listening audio is Gemini text-to-speech with a different random cast for every item.
@@ -23,6 +23,8 @@ Listening audio is Gemini text-to-speech with a different random cast for every 
 - **Exam** (on each section) and **Mock test** (laid out like the real paper) work like the
   real test: change your answers until you submit, results only at the end, a time limit,
   and listening plays each item once. Review answers afterwards to see the explanations.
+- **Custom test:** choose how many 言語知識, 読解 and 聴解 questions you want; they're mixed
+  in the real paper's proportions and order, as an exam or as practice.
 - **Progress** (scores, questions to retry) is kept in your browser. Use Export / Import
   on the Progress page to back it up or move it to another device.
 - **Fresh questions:** add your own Gemini API key in Settings to generate new sets on
