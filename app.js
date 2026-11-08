@@ -149,9 +149,29 @@ function pickUnits(section, n, type, mistakes) {
 
 const homeState = { size: {}, type: {} };
 
+// ---------- back navigation ----------
+
+const backBtn = $("#back-btn");
+let screen = "home";
+function setScreen(name) {
+  screen = name;
+  backBtn.hidden = name === "home";
+  backBtn.setAttribute("aria-label", name === "run" && run.i > 0 ? "Previous question" : "Back to home");
+  // One history entry above the start page, so the phone's back gesture stays inside the app.
+  if (name !== "home" && !history.state?.n2p) history.pushState({ n2p: true }, "");
+}
+function goBack() {
+  if (screen === "run" && run.i > 0) { run.i--; renderUnit(); }
+  else renderHome();
+}
+backBtn.addEventListener("click", goBack);
+addEventListener("popstate", () => { if (screen !== "home") goBack(); });
+
 function renderHome() {
   stopTimer(); setActions(null); player.pause();
   run = null;
+  setScreen("home");
+  if (history.state?.n2p) history.back();  // drop the entry setScreen pushed; its popstate is a no-op here
   const days = daysLeft();
   const s = settings();
   app.innerHTML = `
@@ -263,6 +283,7 @@ function renderUnit() {
   run.unitStart = Date.now();
   run.done = false;
   run.answered = 0;
+  setScreen("run");
   updateTimer();
   player.pause();
   window.scrollTo(0, 0);
@@ -287,10 +308,8 @@ function mountQuestion(el, q, key, onDone, { spoken = false } = {}) {
   });
   el.append(ul);
   const buttons = [...ul.querySelectorAll(".choice")];
-  buttons.forEach((b, k) => b.addEventListener("click", () => {
+  const reveal = (k) => {
     const correct = k === q.answer;
-    record(key, correct);
-    run.results.push({ key, unit: run.units[run.i], q, correct, picked: k });
     if (spoken) { ul.classList.remove("compact"); buttons.forEach((x, j) => x.insertAdjacentHTML("beforeend", `<span>${safeHTML(q.choices[j])}</span>`)); }
     buttons.forEach((x, j) => {
       x.disabled = true;
@@ -310,6 +329,14 @@ function mountQuestion(el, q, key, onDone, { spoken = false } = {}) {
     v.innerHTML = `<strong>${correct ? "正解" : `不正解 · answer ${q.answer + 1}`}</strong>${extra}<p>${esc(q.explanation)}</p>`;
     el.append(v);
     onDone();
+  };
+  // Coming back to a question already answered in this set shows that answer again.
+  const prior = run.results.find((r) => r.key === key);
+  if (prior) return reveal(prior.picked);
+  buttons.forEach((b, k) => b.addEventListener("click", () => {
+    record(key, k === q.answer);
+    run.results.push({ key, unit: run.units[run.i], q, correct: k === q.answer, picked: k });
+    reveal(k);
   }));
 }
 
@@ -420,6 +447,7 @@ function finishUnit() {
 
 function renderResults() {
   stopTimer(); setActions(null); player.pause();
+  setScreen("results");
   const secs = (Date.now() - run.start) / 1000;
   const ok = run.results.filter((r) => r.correct).length;
   const n = run.results.length;
@@ -455,6 +483,7 @@ function renderResults() {
 
 function renderStats() {
   stopTimer(); setActions(null);
+  setScreen("stats");
   const typeRows = {};
   for (const u of units) for (const k of qkeys(u)) {
     const r = store.q[k];
@@ -517,6 +546,7 @@ function renderStats() {
 
 function renderSettings() {
   stopTimer(); setActions(null);
+  setScreen("settings");
   const s = settings();
   app.innerHTML = `<div class="stack">
     <h1>Settings</h1>

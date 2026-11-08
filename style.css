@@ -60,7 +60,15 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
-.bar-home { background: none; border: 0; padding: 4px 0; font-weight: 700; font-size: 17px; letter-spacing: .02em; }
+.bar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.bar-back {
+  min-height: 36px; padding: 4px 12px 4px 8px; border-radius: 999px;
+  border: 1px solid var(--rule); background: var(--sheet); color: var(--ink);
+  font: inherit; font-size: 15px; font-weight: 500; white-space: nowrap;
+}
+.bar-back[hidden] { display: none; }
+.bar-home { background: none; border: 0; padding: 4px 0; font-weight: 700; font-size: 17px; letter-spacing: .02em; white-space: nowrap; }
+@media (max-width: 400px) { .bar-back:not([hidden]) + .bar-home span { display: none; } }
 .bar-home span { font-weight: 500; color: var(--muted); }
 .bar-right { display: flex; align-items: center; gap: 10px; font-family: var(--font-num); font-size: 14px; color: var(--muted); }
 .timer { font-variant-numeric: tabular-nums; }
