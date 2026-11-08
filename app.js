@@ -213,7 +213,7 @@ const TEXT_FONTS = {
   mincho: { name: "明朝", note: "Exam paper" },
   gothic: { name: "ゴシック", note: "Plain" },
   ud: { name: "UDゴシック", note: "Easy to read", load: "BIZ+UDPGothic:wght@400;700" },
-  textbook: { name: "教科書体", note: "Like your Anki deck", load: "Klee+One:wght@400;600" },
+  textbook: { name: "教科書体", note: "Textbook strokes", load: "Klee+One:wght@400;600" },
 };
 // The installed textbook fonts --font-textbook tries before falling back to Klee One from the web,
 // as [CSS family name, name to show]. Kept in the same order as that stack.
