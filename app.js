@@ -62,7 +62,7 @@ function settings() {
     mode: "practice", speed: 1, examDate: "2026-12-06", key: "",
     textModel: "gemini-3.8-flash", ttsModel: "gemini-3.8-flash-tts",
     custom: { lang: 20, reading: 8, listening: 10, minutes: 30, exam: true, minutesSet: false }, theme: "system",
-    textSize: 1, textFont: "mincho",
+    textSize: 1, textFont: "mincho", furigana: true,
   }, store.settings);
 }
 function loadLive() {
@@ -95,6 +95,18 @@ function safeHTML(html) {
   const root = doc.body.firstChild;
   clean(root);
   return root.innerHTML;
+}
+/**
+ * A field as HTML for after the question is answered: the bank's marked copy in `furi`
+ * ({漢字|かんじ} per word) as ruby, or the plain text when furigana is off or the field has no kanji.
+ * `html` says the field may hold tags (stems, choices).
+ */
+function answered(obj, field, i, html = false) {
+  const at = (o) => (i === undefined ? o?.[field] : o?.[field]?.[i]);
+  const plain = field === "lines" ? obj.lines[i].text : at(obj);
+  const marked = settings().furigana ? at(obj.furi) : null;
+  const out = (html ? safeHTML : esc)(marked || plain);
+  return marked ? out.replace(/\{([^|{}]+)\|([^{}]+)\}/g, "<ruby>$1<rt>$2</rt></ruby>") : out;
 }
 function passageHTML(text) {
   return String(text).split(/\n{2,}/).map((chunk) => {
@@ -259,6 +271,9 @@ function textControls() {
         <button class="chip" type="button" data-font-pick="${k}"><b style="font-family:var(--font-${k})">日本語</b><span>${f.name}</span><span>${f.note}</span></button>`).join("")}
       </div>
       <p class="note">教科書体 here: <span data-textbook-found></span></p>
+    </section>
+    <section class="text-set"><h3>Furigana</h3>
+      <button class="chip" type="button" data-furi-toggle>Readings once a question is answered</button>
     </section>`;
 }
 function syncTextControls() {
@@ -268,6 +283,7 @@ function syncTextControls() {
     b.disabled = b.dataset.sizeStep < 0 ? textSize <= TEXT_SIZES[0] : textSize >= TEXT_SIZES.at(-1);
   });
   document.querySelectorAll("[data-font-pick]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.fontPick === textFont)));
+  document.querySelectorAll("[data-furi-toggle]").forEach((b) => b.setAttribute("aria-pressed", String(settings().furigana)));
   const found = installedTextbook();
   document.querySelectorAll("[data-textbook-found]").forEach((s) => {
     s.textContent = found ? `${found}, installed on this device.` : "Klee One, a free look-alike (no textbook font installed on this device).";
@@ -301,6 +317,12 @@ document.addEventListener("click", (e) => {
   }
   const pick = e.target.closest("[data-font-pick]");
   if (pick) { setText("textFont", pick.dataset.fontPick); return; }
+  if (e.target.closest("[data-furi-toggle]")) {
+    setText("furigana", !settings().furigana);
+    // Redraw an answered question in place; listening is left alone, since redrawing it replays the audio.
+    if (screen === "run" && !examLive() && run.units[run.i].section !== "listening") renderUnit();
+    return;
+  }
   if (e.target.closest("#text-btn")) showTextPop(textPop.hidden);
   else if (!textPop.hidden && !e.target.closest("#text-pop")) showTextPop(false);
 });
@@ -616,7 +638,7 @@ function renderUnit() {
   else if (u.questions) renderGroup(u, head);
   else {
     app.innerHTML = `<div class="stack">${head}<p class="prompt">${esc(u.prompt || "")}</p>
-      <p class="stem ${u.type === "usage" ? "word" : ""}">${safeHTML(u.stem)}</p>
+      <p class="stem ${u.type === "usage" ? "word" : ""}" data-ruby-host>${safeHTML(u.stem)}</p>
       <div data-q></div></div>`;
     mountQuestion($("[data-q]"), u, u.id, () => finishUnit());
   }
@@ -692,20 +714,24 @@ function mountQuestion(el, q, key, onDone, { spoken = false } = {}) {
   ul.className = "choices" + (spoken ? " compact" : "");
   q.choices.forEach((c, k) => {
     const li = document.createElement("li");
-    li.innerHTML = `<button class="choice" type="button"><span class="bubble">${k + 1}</span>${spoken ? "" : `<span>${safeHTML(c)}</span>`}</button>`;
+    li.innerHTML = `<button class="choice" type="button"><span class="bubble">${k + 1}</span>${spoken ? "" : `<span data-choice>${safeHTML(c)}</span>`}</button>`;
     ul.append(li);
   });
   el.append(ul);
   const buttons = [...ul.querySelectorAll(".choice")];
   const reveal = (k) => {
     const correct = k === q.answer;
-    if (spoken) { ul.classList.remove("compact"); buttons.forEach((x, j) => x.insertAdjacentHTML("beforeend", `<span>${safeHTML(q.choices[j])}</span>`)); }
+    if (spoken) { ul.classList.remove("compact"); buttons.forEach((x, j) => x.insertAdjacentHTML("beforeend", `<span data-choice></span>`)); }
+    // Readings appear only now, so they never give away a reading question.
+    buttons.forEach((x, j) => (x.querySelector("[data-choice]").innerHTML = answered(q, "choices", j, true)));
+    const host = (q.stem ? el.parentElement : el).querySelector("[data-ruby-host]");
+    if (host) host.innerHTML = answered(q, q.stem ? "stem" : "q", undefined, true);
     buttons.forEach((x, j) => {
       x.disabled = true;
       if (j === k) x.classList.add("picked");
       if (j === q.answer) x.classList.add("right");
       else if (j === k) x.classList.add("wrong");
-      if (q.why_wrong?.[j] && j !== q.answer) x.insertAdjacentHTML("beforeend", `<span class="why">${esc(q.why_wrong[j])}</span>`);
+      if (q.why_wrong?.[j] && j !== q.answer) x.insertAdjacentHTML("beforeend", `<span class="why">${answered(q, "why_wrong", j)}</span>`);
     });
     const v = document.createElement("div");
     v.className = `verdict ${correct ? "ok" : "bad"}`;
@@ -715,7 +741,7 @@ function mountQuestion(el, q, key, onDone, { spoken = false } = {}) {
       const full = q.stem.replace(/＿＿|★/g, () => `<u>${safeHTML(q.choices[q.order[n++]])}</u>`);
       extra = `<p>正しい文：${full}</p>`;
     }
-    v.innerHTML = `<strong>${correct ? "正解" : `${k < 0 ? "未回答" : "不正解"} · answer ${q.answer + 1}`}</strong>${extra}<p>${esc(q.explanation)}</p>`;
+    v.innerHTML = `<strong>${correct ? "正解" : `${k < 0 ? "未回答" : "不正解"} · answer ${q.answer + 1}`}</strong>${extra}<p>${answered(q, "explanation")}</p>`;
     el.append(v);
     onDone();
   };
@@ -758,7 +784,7 @@ function renderGroup(u, head) {
   u.questions.forEach((q, k) => {
     const div = document.createElement("div");
     div.className = "subq";
-    div.innerHTML = `<h3>問${k + 1}　${safeHTML(q.q)}</h3>`;
+    div.innerHTML = `<h3>問${k + 1}　<span data-ruby-host>${safeHTML(q.q)}</span></h3>`;
     box.append(div);
     mountQuestion(div, q, `${u.id}#${k + 1}`, () => { if (++run.answered === u.questions.length) finishUnit(); });
   });
@@ -855,14 +881,14 @@ function mountListeningQuestions(u, printed, onAll) {
 
 function showTranscript(u) {
   const seg = (kind, i) => (u.segments || []).find((x) => x.kind === kind && (i === undefined || x.i === i));
-  const row = (who, jp, en, sg) => `<li><button class="line" type="button" ${sg ? `data-start="${sg.start}" data-end="${sg.end}"` : "disabled"}>
-      <span class="who">${esc(who)}</span><span><span class="jp">${esc(jp)}</span>${en ? `<span class="en">${esc(en)}</span>` : ""}</span></button></li>`;
+  const row = (who, jpHTML, en, sg) => `<li><button class="line" type="button" ${sg ? `data-start="${sg.start}" data-end="${sg.end}"` : "disabled"}>
+      <span class="who">${esc(who)}</span><span><span class="jp">${jpHTML}</span>${en ? `<span class="en">${esc(en)}</span>` : ""}</span></button></li>`;
   let html = "";
-  if (u.setup) html += row("ナレ", u.setup, "", seg("setup"));
-  u.lines.forEach((l, i) => { html += row(l.speaker, l.text, l.en, seg("line", i)); });
-  if (u.question) html += row("ナレ", u.question, "", seg("question"));
-  (u.questions || []).forEach((q, k) => { html += row("ナレ", q.q, "", seg("question", k)); });
-  if (u.choice_mode === "spoken") u.choices.forEach((c, i) => { html += row(`${i + 1}`, c, "", seg("choice", i)); });
+  if (u.setup) html += row("ナレ", answered(u, "setup"), "", seg("setup"));
+  u.lines.forEach((l, i) => { html += row(l.speaker, answered(u, "lines", i), l.en, seg("line", i)); });
+  if (u.question) html += row("ナレ", answered(u, "question"), "", seg("question"));
+  (u.questions || []).forEach((q, k) => { html += row("ナレ", answered(q, "q"), "", seg("question", k)); });
+  if (u.choice_mode === "spoken") u.choices.forEach((c, i) => { html += row(`${i + 1}`, answered(u, "choices", i), "", seg("choice", i)); });
   const box = $("[data-transcript]");
   box.innerHTML = `<div class="panel"><h3>Transcript <span class="note">· tap a line to hear it again</span></h3><ul class="transcript">${html}</ul></div>`;
   $("[data-play]").disabled = false;
@@ -918,7 +944,7 @@ function renderResults() {
       <li class="panel" style="gap:6px"><span class="note">${esc(r.key)} · ${TYPES[r.unit.type] || ""}</span>
       <span style="font-family:var(--font-text)">${safeHTML(r.q.stem || r.q.q || r.unit.question || r.unit.lines?.[0]?.text || "")}</span>
       <span>Answer: <b>${r.q.answer + 1}. ${safeHTML(r.q.choices[r.q.answer])}</b> · yours: ${r.picked < 0 ? "none" : r.picked + 1}</span>
-      <span class="note">${esc(r.q.explanation)}</span></li>`).join("")}</ul>` : `<p>All correct.</p>`}
+      <span class="note">${answered(r.q, "explanation")}</span></li>`).join("")}</ul>` : `<p>All correct.</p>`}
   </div>`;
   const bar = setActions(`<button class="btn secondary" type="button" data-home>Home</button><button class="btn" type="button" data-again>Next set</button>`);
   bar.querySelector("[data-home]").addEventListener("click", renderHome);

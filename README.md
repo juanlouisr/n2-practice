@@ -32,7 +32,9 @@ Listening audio is Gemini text-to-speech with a different random cast for every 
   browser; use Export / Import on the Progress page to back it up or move it.
 - **Text size and font:** Aa in the top bar (also in Settings, and during a test) makes
   questions and passages bigger or smaller, 85% to 175%, and switches the Japanese font
-  between 明朝 (like the exam paper), ゴシック, UDゴシック and 教科書体. 教科書体 uses a textbook
+  between 明朝 (like the exam paper), ゴシック, UDゴシック and 教科書体. Furigana appears on the
+  sentence, choices, explanations and transcript once a question is answered (turn it off
+  under Aa). 教科書体 uses a textbook
   font installed on the device (HGS教科書体, UD デジタル 教科書体, 游教科書体 or Klee) and falls
   back to the free Klee One.
 - **Fresh questions:** add your own Gemini API key in Settings to generate new sets on

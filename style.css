@@ -46,7 +46,7 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 button, input, select { font: inherit; color: inherit; }
-button { cursor: pointer; }
+button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .wrap {
   max-width: 720px; margin: 0 auto;
@@ -171,7 +171,9 @@ h3 { font-size: 16px; }
   text-align: left; background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius);
   padding: 12px 14px; min-height: 52px; font-family: var(--font-text); font-size: 18px; line-height: 1.6;
 }
-.choice:hover:not(:disabled) { border-color: var(--accent); }
+/* Hover only with a mouse: on a touch screen it sticks to whatever was last touched, even while scrolling. */
+@media (hover: hover) { .choice:hover:not(:disabled) { border-color: var(--accent); } }
+.choice:active:not(:disabled) { border-color: var(--accent); }
 .choice:disabled { cursor: default; }
 /* The mark-sheet bubble: an outlined oval that fills like a pencil mark. */
 .bubble {
@@ -185,7 +187,10 @@ h3 { font-size: 16px; }
 .choice.right.picked .bubble { background: var(--ok); border-color: var(--ok); }
 .choice.wrong { border-color: var(--bad); background: var(--bad-soft); }
 .choice.wrong .bubble { background: var(--bad); border-color: var(--bad); color: var(--paper); }
-.choice .why { grid-column: 2; font-family: var(--font-body); font-size: 14px; color: var(--muted); line-height: 1.5; }
+.choice .why { grid-column: 2; font-family: var(--font-body); font-size: 14px; color: var(--muted); line-height: 1.8; }
+/* Furigana, added once a question is answered. */
+ruby { ruby-align: center; }  /* a long reading overhangs instead of spreading the kanji apart */
+rt { font-size: max(.5em, 9px); font-weight: 400; color: var(--muted); letter-spacing: 0; }
 .choices.compact { grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); }
 .choices.compact .choice { grid-template-columns: 1fr; justify-items: center; padding: 10px; }
 .verdict { border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 6px; }
@@ -229,7 +234,8 @@ h3 { font-size: 16px; }
   display: grid; grid-template-columns: 44px 1fr; gap: 8px; width: 100%; text-align: left;
   border: 0; background: none; border-radius: 8px; padding: 8px; min-height: 44px;
 }
-.line:hover, .line.now { background: var(--accent-soft); }
+.line.now { background: var(--accent-soft); }
+@media (hover: hover) { .line:hover { background: var(--accent-soft); } }
 .line .who { font-size: 13px; color: var(--muted); padding-top: 3px; }
 .line .jp { font-family: var(--font-text); font-size: 17px; line-height: 1.7; display: block; }
 .line .en { font-size: 14px; color: var(--muted); line-height: 1.5; display: block; }
@@ -309,7 +315,7 @@ table.data td.num, table.data th.num { text-align: right; font-family: var(--fon
 .viz .line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .viz .dot { fill: var(--accent); stroke: var(--sheet); stroke-width: 2; }
 .viz .hit { fill: transparent; }
-.viz g:hover .bar, .viz g:hover .dot { filter: brightness(1.2); }
+@media (hover: hover) { .viz g:hover .bar, .viz g:hover .dot { filter: brightness(1.2); } }
 .viz .tick { font: 500 9px var(--font-num); fill: var(--muted); }
 .multiples { display: grid; gap: 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .multiples figure { margin: 0; display: grid; gap: 6px; align-content: start; }
