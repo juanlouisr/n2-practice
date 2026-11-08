@@ -157,7 +157,7 @@ h3 { font-size: 16px; }
 
 /* Question */
 .q-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); }
-.prompt { font-size: 14px; color: var(--muted); margin: 0; }
+.prompt { font-family: var(--font-text); font-size: 15px; color: var(--muted); margin: 0; }
 .stem {
   font-family: var(--font-text); font-size: 20px; line-height: 1.9; margin: 0;
   background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius); padding: 16px;
@@ -279,7 +279,7 @@ table.data td.num, table.data th.num { text-align: right; font-family: var(--fon
   width: 88px; min-height: 44px; flex: none; padding: 6px 10px; text-align: right;
   border: 1px solid var(--rule); border-radius: 8px; background: var(--sheet); font: 500 16px var(--font-num);
 }
-.jp-label { font-weight: 700; }
+.jp-label { font-family: var(--font-text); font-weight: 700; }
 
 /* Progress */
 .tiles { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
