@@ -25,8 +25,11 @@ Listening audio is Gemini text-to-speech with a different random cast for every 
   and listening plays each item once. Review answers afterwards to see the explanations.
 - **Custom test:** choose how many 言語知識, 読解 and 聴解 questions you want; they're mixed
   in the real paper's proportions and order, as an exam or as practice.
-- **Progress** (scores, questions to retry) is kept in your browser. Use Export / Import
-  on the Progress page to back it up or move it to another device.
+- **Progress:** an estimated score per part against the pass marks, the question types
+  costing you the most points, daily activity and streak, weekly accuracy, every type's
+  accuracy, trend and speed against exam pace (with a Practice button), grammar patterns
+  you keep missing, exam vs practice accuracy, and coverage. It's all kept in your
+  browser; use Export / Import on the Progress page to back it up or move it.
 - **Fresh questions:** add your own Gemini API key in Settings to generate new sets on
   demand. The key stays in your browser and is sent only to Google.
 

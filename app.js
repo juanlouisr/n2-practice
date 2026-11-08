@@ -47,7 +47,7 @@ let tick = null;
 // ---------- storage ----------
 
 function loadStore() {
-  const empty = { q: {}, sessions: [], settings: {} };
+  const empty = { q: {}, sessions: [], settings: {}, log: [] };
   try {
     return Object.assign(empty, JSON.parse(localStorage.getItem(STORE_KEY) || "{}"));
   } catch {
@@ -141,11 +141,18 @@ function sectionStats(section) {
   }
   return { total, seen, ok, wrong, acc: seen ? Math.round((ok / seen) * 100) : null, units: us.length };
 }
-function record(key, correct) {
+/**
+ * Every answer: the per-question summary in `store.q`, plus one entry in `store.log`
+ * ({t: time, k: key, c: 1 right / 0 wrong, s: seconds or null, x: 1 in an exam}) for trends.
+ */
+const LOG_CAP = 8000;
+function record(key, correct, secs = null, exam = false) {
   const r = store.q[key] || { n: 0, ok: 0 };
   r.n++; if (correct) r.ok++;
   r.lastOk = correct; r.last = Date.now();
   store.q[key] = r;
+  store.log.push({ t: r.last, k: key, c: correct ? 1 : 0, s: secs === null ? null : Math.round(secs * 10) / 10, x: exam ? 1 : 0 });
+  if (store.log.length > LOG_CAP) store.log.splice(0, store.log.length - LOG_CAP);
   saveStore();
 }
 
@@ -488,6 +495,7 @@ function paceFor(u) {
 function renderUnit() {
   const u = run.units[run.i];
   run.unitStart = Date.now();
+  run.lastAnswerAt = null;
   run.done = false;
   run.answered = 0;
   setScreen("run");
@@ -558,7 +566,7 @@ function submitExam(timeUp) {
   for (const u of run.units) qkeys(u).forEach((key, k) => {
     const q = questionsOf(u)[k];
     const picked = run.answers[key] ?? -1;
-    record(key, picked === q.answer);
+    record(key, picked === q.answer, null, true);
     run.results.push({ key, unit: u, q, correct: picked === q.answer, picked });
   });
   renderResults();
@@ -621,8 +629,14 @@ function mountQuestion(el, q, key, onDone, { spoken = false } = {}) {
   const prior = run.results.find((r) => r.key === key);
   if (prior) return reveal(prior.picked);
   buttons.forEach((b, k) => b.addEventListener("click", () => {
-    record(key, k === q.answer);
-    run.results.push({ key, unit: run.units[run.i], q, correct: k === q.answer, picked: k });
+    // Time since the question (or the passage's previous question) appeared. Listening time is
+    // set by the audio, so it isn't counted.
+    const unit = run.units[run.i];
+    const now = Date.now();
+    const secs = unit.section === "listening" ? null : (now - (run.lastAnswerAt || run.unitStart)) / 1000;
+    run.lastAnswerAt = now;
+    record(key, k === q.answer, secs);
+    run.results.push({ key, unit, q, correct: k === q.answer, picked: k });
     reveal(k);
   }));
 }
@@ -812,32 +826,242 @@ function sectionLabel(section, short = false) {
 
 // ---------- progress ----------
 
+const DAY = 86400000;
+const pct = (a, b) => (b ? Math.round((a / b) * 100) : null);
+const shortDate = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+const startOfDay = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+const PASS = { section: 19, total: 90 };  // JLPT N2: 19 of 60 in each section, 90 of 180 overall
+
+/** Everything the Progress page shows, from store.q (per question), store.log (per answer) and store.sessions. */
+function computeProgress() {
+  const keyUnit = new Map();
+  for (const u of units) if (!u.live) for (const k of qkeys(u)) keyUnit.set(k, u);
+  const log = store.log.filter((e) => keyUnit.has(e.k));
+  const rate = (es) => pct(es.filter((e) => e.c).length, es.length);
+
+  const types = [];
+  for (const [part, blueprint] of Object.entries(PAPER)) {
+    const weight = blueprint.reduce((s, b) => s + b[2], 0);
+    for (const [section, type, perPaper] of blueprint) {
+      const us = units.filter((u) => !u.live && u.section === section && u.type === type);
+      if (!us.length) continue;
+      const keys = new Set(us.flatMap(qkeys));
+      const seen = [...keys].filter((k) => store.q[k]);
+      const lastOk = seen.filter((k) => store.q[k].lastOk).length;
+      const entries = log.filter((e) => keys.has(e.k));
+      const recent = entries.slice(-20), before = entries.slice(-40, -20);
+      const timed = entries.filter((e) => e.s !== null && e.s < 600);  // ignore a question left open for ages
+      const t = {
+        part, section, type, perPaper, total: keys.size, seen: seen.length, wrongNow: seen.length - lastOk,
+        acc: pct(lastOk, seen.length),
+        recent: recent.length >= 5 ? rate(recent) : null,
+        before: before.length >= 5 ? rate(before) : null,
+        secs: timed.length >= 3 ? timed.reduce((s, e) => s + e.s, 0) / timed.length : null,
+        pace: section === "listening" ? null : paceFor(us[0]) / qkeys(us[0]).length,
+      };
+      // The figure used for estimates: your last 20 answers, or failing that your last try on each question.
+      t.score = t.recent ?? (t.seen >= 5 ? t.acc : null);
+      // Points this type costs you in a real paper's 60-point section.
+      t.lost = t.score === null ? null : (perPaper / weight) * 60 * (1 - t.score / 100);
+      types.push(t);
+    }
+  }
+
+  const estimate = {};
+  for (const part of Object.keys(PAPER)) {
+    const ts = types.filter((t) => t.part === part);
+    const weight = ts.reduce((s, t) => s + t.perPaper, 0);
+    const known = ts.filter((t) => t.score !== null);
+    const kw = known.reduce((s, t) => s + t.perPaper, 0);
+    // Only estimate a section once types worth at least half its questions have results.
+    estimate[part] = kw / weight >= 0.5
+      ? { score: Math.round((60 * known.reduce((s, t) => s + t.perPaper * t.score, 0)) / kw / 100), coverage: kw / weight }
+      : null;
+  }
+
+  const today = startOfDay(Date.now());
+  const days = Array.from({ length: 28 }, (_, i) => {
+    const from = today - (27 - i) * DAY;
+    const es = log.filter((e) => e.t >= from && e.t < from + DAY);
+    return { t: from, n: es.length, acc: rate(es) };
+  });
+  const active = new Set(log.map((e) => startOfDay(e.t)));
+  let streak = 0;
+  for (let d = active.has(today) ? today : today - DAY; active.has(d); d -= DAY) streak++;
+
+  const partOf = (k) => { const u = keyUnit.get(k); return u.section === "listening" ? "listening" : u.section === "reading" ? "reading" : "lang"; };
+  const weeks = Object.fromEntries(Object.keys(PAPER).map((part) => [part, Array.from({ length: 8 }, (_, i) => {
+    const to = today + DAY - (7 - i) * 7 * DAY;
+    const es = log.filter((e) => e.t >= to - 7 * DAY && e.t < to && partOf(e.k) === part);
+    return { to, n: es.length, acc: es.length >= 5 ? rate(es) : null };
+  })]));
+
+  const patternRows = {};
+  for (const u of units) {
+    if (u.live || u.section !== "grammar" || !u.pattern) continue;
+    const r = store.q[u.id];
+    if (!r) continue;
+    const p = (patternRows[u.pattern] ||= { n: u.pattern, wrong: 0, stillWrong: 0, units: [] });
+    p.wrong += r.n - r.ok;
+    if (!r.lastOk) p.stillWrong++;
+  }
+  for (const u of units) if (!u.live && u.section === "grammar" && patternRows[u.pattern]) patternRows[u.pattern].units.push(u);
+  const weakPatterns = Object.values(patternRows).filter((p) => p.wrong)
+    .sort((a, b) => b.stillWrong - a.stillWrong || b.wrong - a.wrong).slice(0, 8);
+
+  const week = log.filter((e) => e.t >= today - 6 * DAY);
+  const weekSecs = store.sessions.filter((s) => s.t >= today - 6 * DAY).reduce((s, x) => s + x.secs, 0);
+  return {
+    types, estimate, days, streak, weeks, weakPatterns,
+    answered: Object.values(store.q).reduce((s, r) => s + r.n, 0),
+    weekAnswers: week.length, weekAcc: rate(week), weekSecs,
+    examAcc: rate(log.filter((e) => e.x)), practiceAcc: rate(log.filter((e) => !e.x)),
+    examN: log.filter((e) => e.x).length, practiceN: log.filter((e) => !e.x).length,
+    logStart: log[0]?.t ?? null,
+  };
+}
+
+/** Bars of answers per day; each bar's tooltip has the count and how many were right. */
+function activityChart(days) {
+  const max = Math.max(5, ...days.map((d) => d.n));
+  const W = 28 * 10, H = 72;
+  const bars = days.map((d, i) => {
+    const h = d.n ? Math.max(3, (d.n / max) * (H - 4)) : 0;
+    const label = `${shortDate(d.t)}: ${d.n} answered${d.acc === null ? "" : `, ${d.acc}% right`}`;
+    return `<g><title>${esc(label)}</title><rect class="hit" x="${i * 10}" y="0" width="10" height="${H}"></rect>
+      ${h ? `<path class="bar" d="M${i * 10 + 1},${H} v${-(h - 2)} q0,-2 2,-2 h4 q2,0 2,2 v${h - 2} z"></path>` : `<rect class="zero" x="${i * 10 + 1}" y="${H - 1}" width="8" height="1"></rect>`}</g>`;
+  }).join("");
+  return `<svg class="viz" viewBox="0 0 ${W} ${H + 16}" role="img" aria-label="Answers per day over the last four weeks">
+      <line class="axis" x1="0" x2="${W}" y1="${H}" y2="${H}"></line>${bars}
+      <text class="tick" x="0" y="${H + 13}">${esc(shortDate(days[0].t))}</text>
+      <text class="tick" x="${W}" y="${H + 13}" text-anchor="end">today</text>
+    </svg>`;
+}
+
+/** One section's weekly accuracy, 0-100%, with the 50% line the overall pass mark sits near. */
+function trendChart(points) {
+  // Drawn at roughly the size it shows on a phone (a third of the width), so marks keep their size.
+  const W = 100, H = 64, x = (i) => 6 + i * ((W - 12) / 7), y = (v) => 6 + (H - 12) * (1 - v / 100);
+  let path = "", pen = false;
+  points.forEach((p, i) => {
+    if (p.acc === null) { pen = false; return; }
+    path += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(p.acc).toFixed(1)}`;
+    pen = true;
+  });
+  const dots = points.map((p, i) => (p.acc === null ? "" : `<g><title>${esc(`Week to ${shortDate(p.to - DAY)}: ${p.acc}% of ${p.n}`)}</title>
+      <circle class="hit" cx="${x(i)}" cy="${y(p.acc)}" r="9"></circle><circle class="dot" cx="${x(i)}" cy="${y(p.acc)}" r="4"></circle></g>`)).join("");
+  return `<svg class="viz" viewBox="0 0 ${W} ${H}" role="img" aria-label="Weekly accuracy, last 8 weeks">
+      <line class="ref" x1="0" x2="${W}" y1="${y(50)}" y2="${y(50)}"></line>
+      <path class="line" d="${path}"></path>${dots}</svg>`;
+}
+
 function renderStats() {
   stopTimer(); setActions(null);
   setScreen("stats");
-  const typeRows = {};
-  for (const u of units) for (const k of qkeys(u)) {
-    const r = store.q[k];
-    if (!r) continue;
-    const t = `${SECTIONS[u.section].jp} · ${TYPES[u.type] || u.type}`;
-    typeRows[t] = typeRows[t] || [0, 0];
-    typeRows[t][1]++; if (r.lastOk) typeRows[t][0]++;
-  }
-  const pill = (a) => (a === null ? "" : `<span class="pill ${a >= 70 ? "ok" : a >= 50 ? "mid" : "bad"}">${a}%</span>`);
+  const P = computeProgress();
+  const parts = Object.keys(PAPER);
+  const est = P.estimate;
+  const total = parts.every((p) => est[p]) ? parts.reduce((s, p) => s + est[p].score, 0) : null;
+  const passing = total !== null && total >= PASS.total && parts.every((p) => est[p].score >= PASS.section);
+  const trend = (t) => (t.recent === null || t.before === null ? "" : t.recent - t.before >= 5 ? `<span class="up" title="Last 20 answers vs the 20 before">▲ ${t.recent - t.before}</span>`
+    : t.before - t.recent >= 5 ? `<span class="down" title="Last 20 answers vs the 20 before">▼ ${t.before - t.recent}</span>` : "");
+  const focus = P.types.filter((t) => t.lost !== null && t.lost >= 0.5).sort((a, b) => b.lost - a.lost).slice(0, 3);
+  const untried = P.types.filter((t) => t.score === null).sort((a, b) => b.perPaper - a.perPaper).slice(0, 3);
+  const unseen = Object.keys(SECTIONS).reduce((s, sec) => { const st = sectionStats(sec); return s + st.total - st.seen; }, 0);
+  const days = Math.max(1, daysLeft());
   const recent = store.sessions.slice(-12).reverse();
+  const typeName = (t) => `${TYPES[t.type] || t.type}`;
+  const drill = (t) => `<button class="btn secondary small" type="button" data-drill="${t.section}/${t.type}">Practice</button>`;
+
   app.innerHTML = `<div class="stack">
     <h1>Progress</h1>
-    <div class="table-wrap"><table class="data"><thead><tr><th>Section</th><th class="num">Seen</th><th class="num">Correct</th><th class="num">To retry</th></tr></thead><tbody>
-      ${Object.keys(SECTIONS).map((s) => { const st = sectionStats(s); return `<tr><td>${SECTIONS[s].jp} ${SECTIONS[s].en}</td><td class="num">${st.seen}/${st.total}</td><td class="num">${pill(st.acc)}</td><td class="num">${st.wrong}</td></tr>`; }).join("")}
-    </tbody></table></div>
-    <h2>By question type</h2>
-    ${Object.keys(typeRows).length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Type</th><th class="num">Correct (last try)</th></tr></thead><tbody>
-      ${Object.entries(typeRows).sort().map(([t, [a, b]]) => `<tr><td>${t}</td><td class="num">${a}/${b} ${pill(Math.round((a / b) * 100))}</td></tr>`).join("")}
-    </tbody></table></div>` : `<p class="muted">Finish a set to see results by question type.</p>`}
-    <h2>Recent sets</h2>
-    ${recent.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>When</th><th>Section</th><th class="num">Score</th><th class="num">Time</th></tr></thead><tbody>
-      ${recent.map((r) => `<tr><td>${new Date(r.t).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</td><td>${esc(sectionLabel(r.section, true))}${r.exam ? " · exam" : ""}</td><td class="num">${r.ok}/${r.n}</td><td class="num">${fmt(r.secs)}</td></tr>`).join("")}
-    </tbody></table></div>` : `<p class="muted">No sets yet.</p>`}
+    <div class="tiles">
+      <div class="tile"><span class="eyebrow">Answered</span><b>${P.answered}</b><span class="note">questions in all</span></div>
+      <div class="tile"><span class="eyebrow">This week</span><b>${P.weekAcc === null ? "–" : P.weekAcc + "%"}</b><span class="note">right of ${P.weekAnswers}</span></div>
+      <div class="tile"><span class="eyebrow">Streak</span><b>${P.streak}</b><span class="note">day${P.streak === 1 ? "" : "s"} in a row</span></div>
+      <div class="tile"><span class="eyebrow">Study time</span><b>${Math.round(P.weekSecs / 60)}<small> min</small></b><span class="note">in sets this week</span></div>
+    </div>
+
+    <section class="panel">
+      <h2>Estimated score</h2>
+      ${parts.map((p) => `<div class="score-row">
+        <span class="jp-label">${PART_NAMES[p]}</span>
+        <div class="track" title="${est[p] ? `${est[p].score} of 60; pass needs ${PASS.section}` : "Not enough answers yet"}">
+          ${est[p] ? `<i style="width:${(est[p].score / 60) * 100}%"></i>` : ""}<em style="left:${(PASS.section / 60) * 100}%"></em>
+        </div>
+        <span class="num">${est[p] ? `${est[p].score}<small>/60</small>` : `<small>need more</small>`}</span>
+      </div>`).join("")}
+      ${total === null ? `<p class="note">Answer more questions in each part for a full estimate. A part is estimated once types worth half its questions have at least 5 answers.</p>`
+        : `<p class="status ${passing ? "ok" : "bad"}"><b>${passing ? "✓ On track to pass" : "! Below the pass mark"}</b> · ${total}/180 (pass: ${PASS.total}, and ${PASS.section} in each part)</p>`}
+      <p class="note">Your accuracy on each question type, weighted by how many of that type the real paper has. Real JLPT scores are scaled, so read this as a rough guide. The line in each bar is the ${PASS.section}-point minimum.</p>
+    </section>
+
+    ${focus.length || untried.length ? `<section class="panel">
+      <h2>Where the points are</h2>
+      ${focus.map((t) => `<div class="focus-row"><span><b>${typeName(t)}</b> <span class="note">${PART_NAMES[t.part]} · ${t.score}% right</span><br>
+        <span class="note">costs about ${t.lost.toFixed(1)} points per paper (${t.perPaper} question${t.perPaper > 1 ? "s" : ""} in the real test)</span></span>${drill(t)}</div>`).join("")}
+      ${untried.length ? `<p class="note">Not tried enough yet: ${untried.map((t) => `${typeName(t)} (${PART_NAMES[t.part]}, ${t.perPaper} per paper)`).join(", ")}.</p>` : ""}
+    </section>` : ""}
+
+    <section class="panel">
+      <h2>Last 4 weeks</h2>
+      ${P.logStart ? activityChart(P.days) : `<p class="note">Answer a few questions and your daily activity shows up here.</p>`}
+      <p class="note">Questions answered per day${P.logStart && P.logStart > Date.now() - 27 * DAY ? ` (tracked since ${shortDate(P.logStart)})` : ""}. Tap a bar for the day's numbers.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Weekly accuracy</h2>
+      <div class="multiples">${parts.map((p) => `<figure><figcaption><span class="jp-label">${PART_NAMES[p]}</span>
+        <span class="note">${(() => { const w = P.weeks[p].filter((x) => x.acc !== null); return w.length ? `${w.at(-1).acc}% latest` : "no full week yet"; })()}</span></figcaption>
+        ${trendChart(P.weeks[p])}</figure>`).join("")}</div>
+      <p class="note">Share right each week (weeks with at least 5 answers). The dashed line is 50%, about where the overall pass mark sits.</p>
+    </section>
+
+    <section class="panel">
+      <h2>By question type</h2>
+      ${parts.map((p) => `<h3>${PART_NAMES[p]}</h3><ul class="type-list">${P.types.filter((t) => t.part === p).map((t) => `<li>
+        <div class="type-body">
+          <div class="type-main"><b>${typeName(t)}</b>
+            <span class="type-score">${t.score === null ? `<span class="note">–</span>` : `${t.score}%`} ${trend(t)}</span></div>
+          <div class="meter" title="Seen ${t.seen} of ${t.total}"><i style="width:${(t.seen / t.total) * 100}%"></i></div>
+          <div class="type-meta note"><span>seen ${t.seen}/${t.total}</span>${t.wrongNow ? `<span>${t.wrongNow} to retry</span>` : ""}
+            ${t.secs !== null && t.pace ? `<span class="${t.secs > t.pace ? "slow" : ""}">${Math.round(t.secs)}s each (pace ${Math.round(t.pace)}s)</span>` : ""}</div>
+        </div>${drill(t)}
+      </li>`).join("")}</ul>`).join("")}
+      <p class="note">The % is your last 20 answers of that type (or your last try on each question until you have 20). ▲▼ compare them with the 20 before. Time counts practice answers only.</p>
+    </section>
+
+    ${P.weakPatterns.length ? `<section class="panel">
+      <h2>Grammar patterns to review</h2>
+      <ul class="pattern-list">${P.weakPatterns.map((p) => { const pat = patterns.find((x) => x.n === p.n); return `<li><b>${esc(pat?.pattern || `#${p.n}`)}</b>
+        ${pat?.reading && pat.reading.replace(/\s/g, "") !== pat.pattern.replace(/\s/g, "") ? `<span class="note">${esc(pat.reading)}</span>` : ""}<span class="note">missed ${p.wrong}×${p.stillWrong ? ` · still wrong on ${p.stillWrong}` : ""}</span></li>`; }).join("")}</ul>
+      <button class="btn secondary" type="button" data-drill-patterns>Practice these patterns</button>
+    </section>` : ""}
+
+    <section class="panel">
+      <h2>Exam vs practice</h2>
+      <div class="tiles two">
+        <div class="tile"><span class="eyebrow">Practice</span><b>${P.practiceAcc === null ? "–" : P.practiceAcc + "%"}</b><span class="note">of ${P.practiceN} answers</span></div>
+        <div class="tile"><span class="eyebrow">Exam</span><b>${P.examAcc === null ? "–" : P.examAcc + "%"}</b><span class="note">of ${P.examN} answers</span></div>
+      </div>
+      <p class="note">${P.examN >= 20 && P.practiceN >= 20 && P.practiceAcc - P.examAcc >= 10 ? "You score noticeably lower under exam conditions. More timed sets and mock tests will close that gap." : "Exam answers come from exam mode, mock tests and custom tests run as exams."}</p>
+    </section>
+
+    <section class="panel">
+      <h2>Coverage</h2>
+      ${Object.keys(SECTIONS).map((sec) => { const st = sectionStats(sec); return `<div class="score-row">
+        <span class="jp-label">${SECTIONS[sec].jp}</span>
+        <div class="meter"><i style="width:${(st.seen / st.total) * 100}%"></i></div>
+        <span class="num"><small>${st.seen}/${st.total}</small></span></div>`; }).join("")}
+      <p class="note">${unseen ? `${unseen} questions you haven't seen yet. About ${Math.ceil(unseen / days)} new ones a day would cover the whole bank before the exam.` : "You've seen every question in the bank."}</p>
+    </section>
+
+    <section class="stack" style="gap:8px">
+      <h2>Recent sets</h2>
+      ${recent.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>When</th><th>Set</th><th class="num">Score</th><th class="num">Time</th></tr></thead><tbody>
+        ${recent.map((r) => `<tr><td>${shortDate(r.t)}</td><td>${esc(sectionLabel(r.section, true))}${r.exam ? " · exam" : ""}</td><td class="num">${r.ok}/${r.n} <span class="note">${pct(r.ok, r.n)}%</span></td><td class="num">${fmt(r.secs)}</td></tr>`).join("")}
+      </tbody></table></div>` : `<p class="muted">No sets yet.</p>`}
+    </section>
     <div class="panel">
       <h3>Backup</h3>
       <p class="note">Progress is saved in this browser only. Export it to keep a copy or move it to another device.</p>
@@ -846,6 +1070,15 @@ function renderStats() {
       <p class="toast" data-msg></p>
     </div>
   </div>`;
+  app.querySelectorAll("[data-drill]").forEach((b) => b.addEventListener("click", () => {
+    const [section, type] = b.dataset.drill.split("/");
+    startRun(section, pickUnits(section, SECTIONS[section].sizes[0], type, false));
+  }));
+  $("[data-drill-patterns]")?.addEventListener("click", () => {
+    // Both items for each pattern, the ones you got wrong first.
+    const list = P.weakPatterns.flatMap((p) => p.units).sort((a, b) => (store.q[a.id]?.lastOk ?? true) - (store.q[b.id]?.lastOk ?? true));
+    startRun("grammar", list.slice(0, 16));
+  });
   $("[data-export]").addEventListener("click", () => {
     const { key, ...safe } = store.settings; // never put the API key in a backup file
     const blob = new Blob([JSON.stringify({ ...store, settings: safe }, null, 1)], { type: "application/json" });
@@ -864,6 +1097,8 @@ function renderStats() {
       for (const [k, r] of Object.entries(data.q)) if (!store.q[k] || (r.last || 0) > (store.q[k].last || 0)) store.q[k] = r;
       const seen = new Set(store.sessions.map((s) => s.t));
       store.sessions = [...store.sessions, ...data.sessions.filter((s) => !seen.has(s.t))].sort((a, b) => a.t - b.t);
+      const logged = new Set(store.log.map((e) => `${e.t}|${e.k}`));
+      store.log = [...store.log, ...(data.log || []).filter((e) => !logged.has(`${e.t}|${e.k}`))].sort((a, b) => a.t - b.t).slice(-LOG_CAP);
       saveStore();
       msg.textContent = "Progress imported.";
       setTimeout(renderStats, 600);
