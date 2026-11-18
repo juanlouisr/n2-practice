@@ -919,9 +919,11 @@ function renderResults() {
   const secs = (run.end - run.start) / 1000;
   const ok = run.results.filter((r) => r.correct).length;
   const n = run.results.length;
+  const est = setEstimate(run.results);
   if (!run.saved) {  // coming back from Review answers shows the same set, not a new one
     run.saved = true;
-    store.sessions.push({ t: Date.now(), section: run.section, n, ok, secs: Math.round(secs), ...(run.exam ? { exam: true } : {}) });
+    run.session = { t: Date.now(), section: run.section, n, ok, secs: Math.round(secs), est, ...(run.exam ? { exam: true } : {}) };
+    store.sessions.push(run.session);
     store.sessions = store.sessions.slice(-300);
     saveStore();
   }
@@ -937,6 +939,7 @@ function renderResults() {
     <div class="row" style="align-items:baseline;gap:14px"><span class="score">${ok}/${n}</span><span class="muted">${Math.round((ok / n) * 100)}% · ${fmt(secs)}</span></div>
     ${run.timeUp ? `<p class="verdict bad">Time ran out, so the sheet was handed in automatically.</p>` : ""}
     <div class="row"><button class="btn secondary" type="button" data-review>Review answers</button></div>
+    ${estimatePanel(est)}
     <div class="table-wrap"><table class="data"><thead><tr><th>Type</th><th class="num">Correct</th></tr></thead><tbody>
       ${Object.entries(byType).map(([t, [a, b]]) => `<tr><td>${t}</td><td class="num">${a}/${b}</td></tr>`).join("")}
     </tbody></table></div>
@@ -950,6 +953,34 @@ function renderResults() {
   bar.querySelector("[data-home]").addEventListener("click", renderHome);
   bar.querySelector("[data-again]").addEventListener("click", run.again);
   $("[data-review]").addEventListener("click", () => { run.reviewing = true; run.i = 0; renderUnit(); });
+}
+/**
+ * The results screen's JLPT-style score. A part this set didn't cover is filled in from your
+ * latest exam that did (a 言語知識・読解 mock plus a 聴解 mock make a full paper).
+ */
+function estimatePanel(est) {
+  const parts = Object.keys(PAPER);
+  if (!Object.keys(est).length) return "";
+  const rows = {}, borrowed = [];
+  for (const p of parts) {
+    if (est[p]) { rows[p] = est[p]; continue; }
+    const s = run.exam && [...store.sessions].reverse().find((x) => x.exam && x.est?.[p] && x !== run.session);
+    if (s) { rows[p] = s.est[p]; borrowed.push(`${PART_NAMES[p]} from your exam on ${shortDate(s.t)}`); }
+  }
+  const shown = parts.filter((p) => rows[p]);
+  const below = shown.filter((p) => rows[p].score < PASS.section);
+  const total = shown.length === 3 ? shown.reduce((s, p) => s + rows[p].score, 0) : null;
+  const passing = total !== null ? total >= PASS.total && !below.length : !below.length;
+  const status = total !== null
+    ? `<b>${passing ? "✓ A passing score" : "! Below the pass mark"}</b> · ${total}/180 (pass: ${PASS.total}, and ${PASS.section} in each part)`
+    : `<b>${passing ? `✓ Above the ${PASS.section}-point minimum` : `! Below the ${PASS.section}-point minimum in ${below.map((p) => PART_NAMES[p]).join(" and ")}`}</b>`;
+  const missing = parts.filter((p) => !rows[p]).map((p) => PART_NAMES[p]);
+  return `<section class="panel">
+    <h2>Estimated JLPT score</h2>
+    ${shown.map((p) => scoreRow(p, rows[p])).join("")}
+    <p class="status ${passing ? "ok" : "bad"}">${status}</p>
+    <p class="note">This set's accuracy on each question type, weighted by how many of that type the real paper has${borrowed.length ? `; ${borrowed.join(", ")}` : ""}. ${missing.length ? `Take ${missing.join(" and ")} as an exam too for a total out of 180. ` : ""}Real JLPT scores are scaled, so read this as a rough guide.</p>
+  </section>`;
 }
 function sectionLabel(section, short = false) {
   if (SECTIONS[section]) return short ? SECTIONS[section].jp : `${SECTIONS[section].jp} · ${SECTIONS[section].en}`;
@@ -965,6 +996,37 @@ const pct = (a, b) => (b ? Math.round((a / b) * 100) : null);
 const shortDate = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 const startOfDay = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
 const PASS = { section: 19, total: 90 };  // JLPT N2: 19 of 60 in each section, 90 of 180 overall
+
+/** One part's bar out of 60, with the pass minimum marked. `e` is {score} or null. */
+function scoreRow(part, e) {
+  return `<div class="score-row">
+    <span class="jp-label">${PART_NAMES[part]}</span>
+    <div class="track" title="${e ? `${e.score} of 60; pass needs ${PASS.section}` : "Not enough answers yet"}">
+      ${e ? `<i style="width:${(e.score / 60) * 100}%"></i>` : ""}<em style="left:${(PASS.section / 60) * 100}%"></em>
+    </div>
+    <span class="num">${e ? `${e.score}<small>/60</small>` : `<small>need more</small>`}</span>
+  </div>`;
+}
+
+/**
+ * A JLPT-style score for one set: per part, the accuracy on each question type in the set,
+ * weighted by how many of that type the real paper has. Parts with under 5 questions are left out.
+ */
+function setEstimate(results) {
+  const out = {};
+  for (const [part, blueprint] of Object.entries(PAPER)) {
+    let n = 0, weight = 0, sum = 0;
+    for (const [section, type, perPaper] of blueprint) {
+      const rs = results.filter((r) => r.unit.section === section && r.unit.type === type);
+      if (!rs.length) continue;
+      n += rs.length;
+      weight += perPaper;
+      sum += (perPaper * rs.filter((r) => r.correct).length) / rs.length;
+    }
+    if (n >= 5) out[part] = { score: Math.round((60 * sum) / weight), n };
+  }
+  return out;
+}
 
 /** Everything the Progress page shows, from store.q (per question), store.log (per answer) and store.sessions. */
 function computeProgress() {
@@ -1118,13 +1180,7 @@ function renderStats() {
 
     <section class="panel">
       <h2>Estimated score</h2>
-      ${parts.map((p) => `<div class="score-row">
-        <span class="jp-label">${PART_NAMES[p]}</span>
-        <div class="track" title="${est[p] ? `${est[p].score} of 60; pass needs ${PASS.section}` : "Not enough answers yet"}">
-          ${est[p] ? `<i style="width:${(est[p].score / 60) * 100}%"></i>` : ""}<em style="left:${(PASS.section / 60) * 100}%"></em>
-        </div>
-        <span class="num">${est[p] ? `${est[p].score}<small>/60</small>` : `<small>need more</small>`}</span>
-      </div>`).join("")}
+      ${parts.map((p) => scoreRow(p, est[p])).join("")}
       ${total === null ? `<p class="note">Answer more questions in each part for a full estimate. A part is estimated once types worth half its questions have at least 5 answers.</p>`
         : `<p class="status ${passing ? "ok" : "bad"}"><b>${passing ? "✓ On track to pass" : "! Below the pass mark"}</b> · ${total}/180 (pass: ${PASS.total}, and ${PASS.section} in each part)</p>`}
       <p class="note">Your accuracy on each question type, weighted by how many of that type the real paper has. Real JLPT scores are scaled, so read this as a rough guide. The line in each bar is the ${PASS.section}-point minimum.</p>

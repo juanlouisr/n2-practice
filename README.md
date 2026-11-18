@@ -22,7 +22,9 @@ Listening audio is Gemini text-to-speech with a different random cast for every 
   a line replays it.
 - **Exam** (on each section) and **Mock test** (laid out like the real paper) work like the
   real test: change your answers until you submit, results only at the end, a time limit,
-  and listening plays each item once. Review answers afterwards to see the explanations.
+  and listening plays each item once. Results show an estimated JLPT score per part against
+  the pass marks; a 言語知識・読解 mock is combined with your latest 聴解 exam for a total out
+  of 180. Review answers afterwards to see the explanations.
 - **Custom test:** choose how many 言語知識, 読解 and 聴解 questions you want; they're mixed
   in the real paper's proportions and order, as an exam or as practice.
 - **Progress:** an estimated score per part against the pass marks, the question types
