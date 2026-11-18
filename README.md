@@ -27,6 +27,8 @@ Listening audio is Gemini text-to-speech with a different random cast for every 
   of 180. Review answers afterwards to see the explanations.
 - **Custom test:** choose how many 言語知識, 読解 and 聴解 questions you want; they're mixed
   in the real paper's proportions and order, as an exam or as practice.
+- **Home** shows your estimated score per part and in total, and the total of your latest
+  exams once they cover a full paper.
 - **Progress:** an estimated score per part against the pass marks, the question types
   costing you the most points, daily activity and streak, weekly accuracy, every type's
   accuracy, trend and speed against exam pace (with a Practice button), grammar patterns

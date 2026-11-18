@@ -368,6 +368,7 @@ function renderHome() {
         <span class="eyebrow">JLPT N2 · ${esc(s.examDate)}</span>
         <div class="countdown"><b>${days > 0 ? days : 0}</b><span>${days > 0 ? "days until the exam" : "exam day has passed"}</span></div>
       </section>
+      ${homeScoreCard()}
       <section class="sections">${Object.keys(SECTIONS).map(sectionCard).join("")}</section>
       <article class="section-card">
         <header><span class="jp">模擬試験</span><span class="eyebrow">Mock test</span></header>
@@ -954,6 +955,35 @@ function renderResults() {
   bar.querySelector("[data-again]").addEventListener("click", run.again);
   $("[data-review]").addEventListener("click", () => { run.reviewing = true; run.i = 0; renderUnit(); });
 }
+/**
+ * The home page's score: the Progress estimate from all practice, and the total of your latest
+ * exam in each part once those cover a full paper. Nothing until there is something to show.
+ */
+function homeScoreCard() {
+  const parts = Object.keys(PAPER);
+  const est = computeProgress().estimate;
+  const exams = {};
+  for (const p of parts) {
+    const s = [...store.sessions].reverse().find((x) => x.exam && x.est?.[p]);
+    if (s) exams[p] = s;
+  }
+  if (!parts.some((p) => est[p]) && !Object.keys(exams).length) return "";
+  const total = parts.every((p) => est[p]) ? parts.reduce((s, p) => s + est[p].score, 0) : null;
+  const passing = total !== null && total >= PASS.total && parts.every((p) => est[p].score >= PASS.section);
+  const examTotal = parts.every((p) => exams[p]) ? parts.reduce((s, p) => s + exams[p].est[p].score, 0) : null;
+  const examFrom = examTotal === null ? "" : shortDate(Math.min(...parts.map((p) => exams[p].t)));
+  return `<section class="panel">
+    <header class="row" style="justify-content:space-between">
+      <h2>Estimated score</h2>
+      ${total === null ? "" : `<span class="status ${passing ? "ok" : "bad"}"><b>${total}</b>/180 · ${passing ? "on track" : "below pass"}</span>`}
+    </header>
+    ${parts.map((p) => scoreRow(p, est[p])).join("")}
+    ${total === null ? `<p class="note">From your practice so far; each part fills in once you've answered enough of it.</p>` : ""}
+    ${examTotal === null ? "" : `<p class="note">Latest exams (since ${examFrom}): <b>${examTotal}/180</b>, ${examTotal >= PASS.total && parts.every((p) => exams[p].est[p].score >= PASS.section) ? "a passing score" : "below the pass mark"}.</p>`}
+    <div class="row"><button class="btn secondary small" type="button" data-go="stats">Details</button></div>
+  </section>`;
+}
+
 /**
  * The results screen's JLPT-style score. A part this set didn't cover is filled in from your
  * latest exam that did (a 言語知識・読解 mock plus a 聴解 mock make a full paper).
