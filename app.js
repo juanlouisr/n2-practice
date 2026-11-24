@@ -62,7 +62,7 @@ function settings() {
     mode: "practice", speed: 1, examDate: "2026-12-06", key: "",
     textModel: "gemini-3.8-flash", ttsModel: "gemini-3.8-flash-tts",
     custom: { lang: 20, reading: 8, listening: 10, minutes: 30, exam: true, minutesSet: false }, theme: "system",
-    textSize: 1, textFont: "mincho", furigana: true,
+    textSize: 1, textFont: "mincho", furigana: true, translate: true,
   }, store.settings);
 }
 function loadLive() {
@@ -274,6 +274,9 @@ function textControls() {
     </section>
     <section class="text-set"><h3>Furigana</h3>
       <button class="chip" type="button" data-furi-toggle>Readings once a question is answered</button>
+    </section>
+    <section class="text-set"><h3>Translation</h3>
+      <button class="chip" type="button" data-trans-toggle>English once a question is answered</button>
     </section>`;
 }
 function syncTextControls() {
@@ -284,6 +287,7 @@ function syncTextControls() {
   });
   document.querySelectorAll("[data-font-pick]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.fontPick === textFont)));
   document.querySelectorAll("[data-furi-toggle]").forEach((b) => b.setAttribute("aria-pressed", String(settings().furigana)));
+  document.querySelectorAll("[data-trans-toggle]").forEach((b) => b.setAttribute("aria-pressed", String(settings().translate)));
   const found = installedTextbook();
   document.querySelectorAll("[data-textbook-found]").forEach((s) => {
     s.textContent = found ? `${found}, installed on this device.` : "Klee One, a free look-alike (no textbook font installed on this device).";
@@ -317,8 +321,10 @@ document.addEventListener("click", (e) => {
   }
   const pick = e.target.closest("[data-font-pick]");
   if (pick) { setText("textFont", pick.dataset.fontPick); return; }
-  if (e.target.closest("[data-furi-toggle]")) {
-    setText("furigana", !settings().furigana);
+  const toggle = e.target.closest("[data-furi-toggle], [data-trans-toggle]");
+  if (toggle) {
+    const key = toggle.matches("[data-furi-toggle]") ? "furigana" : "translate";
+    setText(key, !settings()[key]);
     // Redraw an answered question in place; listening is left alone, since redrawing it replays the audio.
     if (screen === "run" && !examLive() && run.units[run.i].section !== "listening") renderUnit();
     return;
@@ -727,6 +733,16 @@ function mountQuestion(el, q, key, onDone, { spoken = false } = {}) {
     buttons.forEach((x, j) => (x.querySelector("[data-choice]").innerHTML = answered(q, "choices", j, true)));
     const host = (q.stem ? el.parentElement : el).querySelector("[data-ruby-host]");
     if (host) host.innerHTML = answered(q, q.stem ? "stem" : "q", undefined, true);
+    // English once answered: the sentence (with the right answer in place) and each choice.
+    const en = settings().translate ? q.en : null;
+    const line = en?.stem ?? en?.q;
+    const anchor = q.stem ? host : host?.closest("h3");
+    if (anchor && line && !anchor.nextElementSibling?.classList.contains("trans")) {
+      anchor.insertAdjacentHTML("afterend", `<p class="trans">${safeHTML(line)}</p>`);
+    }
+    buttons.forEach((x, j) => {
+      if (en?.choices?.[j]) x.querySelector("[data-choice]").insertAdjacentHTML("afterend", `<span class="trans">${esc(en.choices[j])}</span>`);
+    });
     buttons.forEach((x, j) => {
       x.disabled = true;
       if (j === k) x.classList.add("picked");
@@ -782,12 +798,20 @@ function renderGroup(u, head) {
     : `<div class="passage">${u.title ? `<p class="label">${esc(u.title)}</p>` : ""}${passageHTML(u.passage)}</div>`;
   app.innerHTML = `<div class="stack">${head}<p class="prompt">${esc(u.prompt || "")}</p>${passages}<div class="stack" data-qs></div></div>`;
   const box = $("[data-qs]");
+  // The passage's English opens up under it once the first question is answered.
+  const showPassageEn = () => {
+    if (!settings().translate || !u.en?.passage || app.querySelector(".trans-block")) return;
+    const parts = app.querySelectorAll(".passage");
+    [u.en.passage, u.en.passage_b].forEach((text, i) => text && parts[i]?.insertAdjacentHTML("afterend",
+      `<details class="trans-block"><summary>English translation${u.passage_b ? ` · ${i ? "B" : "A"}` : ""}</summary>
+        ${i === 0 && u.en.title ? `<p class="label">${esc(u.en.title)}</p>` : ""}${passageHTML(text)}</details>`));
+  };
   u.questions.forEach((q, k) => {
     const div = document.createElement("div");
     div.className = "subq";
     div.innerHTML = `<h3>問${k + 1}　<span data-ruby-host>${safeHTML(q.q)}</span></h3>`;
     box.append(div);
-    mountQuestion(div, q, `${u.id}#${k + 1}`, () => { if (++run.answered === u.questions.length) finishUnit(); });
+    mountQuestion(div, q, `${u.id}#${k + 1}`, () => { showPassageEn(); if (++run.answered === u.questions.length) finishUnit(); });
   });
 }
 
@@ -885,11 +909,11 @@ function showTranscript(u) {
   const row = (who, jpHTML, en, sg) => `<li><button class="line" type="button" ${sg ? `data-start="${sg.start}" data-end="${sg.end}"` : "disabled"}>
       <span class="who">${esc(who)}</span><span><span class="jp">${jpHTML}</span>${en ? `<span class="en">${esc(en)}</span>` : ""}</span></button></li>`;
   let html = "";
-  if (u.setup) html += row("ナレ", answered(u, "setup"), "", seg("setup"));
+  if (u.setup) html += row("ナレ", answered(u, "setup"), u.en?.setup, seg("setup"));
   u.lines.forEach((l, i) => { html += row(l.speaker, answered(u, "lines", i), l.en, seg("line", i)); });
-  if (u.question) html += row("ナレ", answered(u, "question"), "", seg("question"));
-  (u.questions || []).forEach((q, k) => { html += row("ナレ", answered(q, "q"), "", seg("question", k)); });
-  if (u.choice_mode === "spoken") u.choices.forEach((c, i) => { html += row(`${i + 1}`, answered(u, "choices", i), "", seg("choice", i)); });
+  if (u.question) html += row("ナレ", answered(u, "question"), u.en?.question, seg("question"));
+  (u.questions || []).forEach((q, k) => { html += row("ナレ", answered(q, "q"), q.en?.q, seg("question", k)); });
+  if (u.choice_mode === "spoken") u.choices.forEach((c, i) => { html += row(`${i + 1}`, answered(u, "choices", i), u.en?.choices?.[i], seg("choice", i)); });
   const box = $("[data-transcript]");
   box.innerHTML = `<div class="panel"><h3>Transcript <span class="note">· tap a line to hear it again</span></h3><ul class="transcript">${html}</ul></div>`;
   $("[data-play]").disabled = false;

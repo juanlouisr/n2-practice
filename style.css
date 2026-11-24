@@ -188,6 +188,14 @@ h3 { font-size: 16px; }
 .choice.wrong { border-color: var(--bad); background: var(--bad-soft); }
 .choice.wrong .bubble { background: var(--bad); border-color: var(--bad); color: var(--paper); }
 .choice .why { grid-column: 2; font-family: var(--font-body); font-size: 14px; color: var(--muted); line-height: 1.8; }
+/* English, added once a question is answered. */
+.trans { display: block; margin: 0; font-family: var(--font-body); font-size: 15px; line-height: 1.5; color: var(--muted); font-style: italic; }
+.stem.word + .trans { text-align: center; }
+.choice .trans { grid-column: 2; font-size: 14px; }
+.subq h3 + .trans { margin-top: -6px; }
+.trans-block { border: 1px solid var(--rule); border-radius: var(--radius); background: var(--sheet); padding: 10px 14px; font-size: 15px; line-height: 1.7; }
+.trans-block summary { cursor: pointer; font-weight: 700; font-size: 14px; color: var(--accent); }
+.trans-block p { margin: 10px 0 0; }
 /* Furigana, added once a question is answered. */
 ruby { ruby-align: center; }  /* a long reading overhangs instead of spreading the kanji apart */
 rt { font-size: max(.5em, 9px); font-weight: 400; color: var(--muted); letter-spacing: 0; }
